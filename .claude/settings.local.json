@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull:*)",
+      "Bash(python -m venv .venv)",
+      "Bash(source .venv/Scripts/activate)",
+      "Bash(pip install:*)",
+      "Bash(ls .env*)",
+      "Bash(python -c \"from database.models import init_db; init_db\\(\\); print\\(''DB OK''\\)\")",
+      "Bash(python -c \"from config.settings import WATCHLIST; print\\(f''{len\\(WATCHLIST\\)} tickers OK''\\)\")",
+      "Bash(python -c \":*)"
+    ]
+  }
+}

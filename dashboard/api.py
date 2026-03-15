@@ -79,6 +79,7 @@ from database.models import (
     init_db, save_scores, save_market_context,
     get_score_history, get_score_trend,
     save_trade, get_all_trades, get_trade_by_id, close_trade, delete_trade,
+    DB_PATH,
 )
 
 # ── App ─────────────────────────────────────────────────────────────────────
@@ -192,6 +193,43 @@ def ping():
     return {"status": "ok", "message": "API fonctionne"}
 
 
+_MACRO_INDICATORS = [
+    {"symbol": "^IRX", "name": "T-Bill 13W"},
+    {"symbol": "^FVX", "name": "Treasury 5Y"},
+    {"symbol": "^TNX", "name": "Treasury 10Y"},
+    {"symbol": "^TYX", "name": "Treasury 30Y"},
+    {"symbol": "GC=F",  "name": "Gold"},
+    {"symbol": "CL=F",  "name": "WTI Crude"},
+]
+
+
+def _fetch_macro_indicators() -> list:
+    """Récupère les indicateurs macro via yfinance. Try/except individuel par symbole."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        return []
+
+    results = []
+    for ind in _MACRO_INDICATORS:
+        try:
+            tk = yf.Ticker(ind["symbol"])
+            hist = tk.history(period="5d", interval="1d", auto_adjust=True)
+            if hist is None or hist.empty or len(hist) < 2:
+                results.append({"symbol": ind["symbol"], "name": ind["name"],
+                                 "price": None, "change_pct": None})
+                continue
+            price = float(hist["Close"].iloc[-1])
+            prev  = float(hist["Close"].iloc[-2])
+            change_pct = round((price - prev) / prev * 100, 2) if prev else None
+            results.append({"symbol": ind["symbol"], "name": ind["name"],
+                             "price": round(price, 4), "change_pct": change_pct})
+        except Exception:
+            results.append({"symbol": ind["symbol"], "name": ind["name"],
+                             "price": None, "change_pct": None})
+    return results
+
+
 @app.get("/api/market")
 def get_market():
     """Contexte marché scoré : SPY, QQQ, VIX, DXY, US10Y + régime BULL/NEUTRAL/BEAR."""
@@ -214,6 +252,7 @@ def get_market():
                 "dxy":   _instrument(context, "DX-Y.NYB"),
                 "us10y": _instrument(context, "^TNX"),
             },
+            "macro_indicators": _fetch_macro_indicators(),
             "updated_at": datetime.now().isoformat(),
         })
     except Exception as e:
@@ -956,6 +995,161 @@ def delete_trade_endpoint(trade_id: int):
         return {"deleted": True, "id": trade_id}
     except Exception as e:
         return {"error": str(e)}
+
+
+# ── Performance analytics ──────────────────────────────────────────────────────
+
+@app.get("/api/performance")
+def get_performance():
+    """Stats de performance complètes sur tous les trades clôturés."""
+    _empty = {
+        "total_trades": 0, "wins": 0, "losses": 0, "be": 0,
+        "winrate": 0, "profit_factor": None, "expectancy": 0,
+        "max_drawdown": 0, "total_pnl": 0, "avg_rr_realized": None,
+        "best_trade": None, "worst_trade": None,
+        "equity_curve": [], "monthly_returns": [], "drawdown_curve": [],
+        "by_ticker": [], "by_setup": [], "by_regime": [],
+    }
+    try:
+        import sqlite3 as _sq
+        with _sq.connect(DB_PATH) as conn:
+            conn.row_factory = _sq.Row
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status != 'OPEN' ORDER BY date_close ASC"
+            ).fetchall()
+        trades = [dict(r) for r in rows]
+
+        if not trades:
+            return clean_for_json(_empty)
+
+        wins   = [t for t in trades if t["status"] == "CLOSED_WIN"]
+        losses = [t for t in trades if t["status"] == "CLOSED_LOSS"]
+        be     = [t for t in trades if t["status"] == "CLOSED_BE"]
+
+        total_pnl     = sum(t["pnl_dollars"] or 0 for t in trades)
+        gross_win     = sum(t["pnl_dollars"] or 0 for t in wins)
+        gross_loss    = abs(sum(t["pnl_dollars"] or 0 for t in losses))
+        winrate       = round(len(wins) / len(trades) * 100, 1)
+        profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
+        expectancy    = round(total_pnl / len(trades), 2)
+
+        rr_vals  = [t["rr_realized"] for t in trades if t.get("rr_realized") is not None]
+        avg_rr   = round(sum(rr_vals) / len(rr_vals), 2) if rr_vals else None
+
+        by_pnl      = sorted(trades, key=lambda t: t["pnl_dollars"] or 0)
+        best_trade  = {"ticker": by_pnl[-1]["ticker"], "pnl": by_pnl[-1]["pnl_dollars"], "date": (by_pnl[-1]["date_close"] or "")[:10]} if by_pnl else None
+        worst_trade = {"ticker": by_pnl[0]["ticker"],  "pnl": by_pnl[0]["pnl_dollars"],  "date": (by_pnl[0]["date_close"] or "")[:10]}  if by_pnl else None
+
+        # Equity curve + drawdown curve (chronological)
+        cum = 0.0
+        peak = 0.0
+        equity_curve   = []
+        drawdown_curve = []
+        for t in trades:
+            cum  += t["pnl_dollars"] or 0
+            date  = (t["date_close"] or t["date_open"] or "")[:10]
+            equity_curve.append({"date": date, "pnl": round(cum, 2)})
+            peak  = max(peak, cum)
+            drawdown_curve.append({"date": date, "drawdown": round(cum - peak, 2)})
+
+        max_drawdown = min((d["drawdown"] for d in drawdown_curve), default=0)
+
+        # Monthly returns
+        monthly: dict = {}
+        for t in trades:
+            date  = (t["date_close"] or t["date_open"] or "")[:10]
+            month = date[:7]
+            if month not in monthly:
+                monthly[month] = {"month": month, "pnl": 0.0, "trades": 0, "wins": 0}
+            monthly[month]["pnl"]    += t["pnl_dollars"] or 0
+            monthly[month]["trades"] += 1
+            if t["status"] == "CLOSED_WIN":
+                monthly[month]["wins"] += 1
+        monthly_returns = []
+        for v in sorted(monthly.values(), key=lambda x: x["month"]):
+            monthly_returns.append({
+                "month":   v["month"],
+                "pnl":     round(v["pnl"], 2),
+                "trades":  v["trades"],
+                "winrate": round(v["wins"] / v["trades"] * 100, 1) if v["trades"] else 0,
+            })
+
+        # By ticker
+        def _group(trades_list, key_fn, val_fn):
+            m: dict = {}
+            for t in trades_list:
+                k = key_fn(t)
+                if k not in m:
+                    m[k] = {"_wins": 0, "_trades": 0, "_pnl": 0.0, "_gw": 0.0, "_gl": 0.0, "_rr": [], "_key": k}
+                m[k]["_trades"] += 1
+                m[k]["_pnl"]    += t["pnl_dollars"] or 0
+                pnl = t["pnl_dollars"] or 0
+                if pnl > 0: m[k]["_gw"] += pnl
+                else:       m[k]["_gl"] += abs(pnl)
+                if t["status"] == "CLOSED_WIN": m[k]["_wins"] += 1
+                if t.get("rr_realized") is not None: m[k]["_rr"].append(t["rr_realized"])
+            return {k: val_fn(v) for k, v in m.items()}
+
+        tk_map = _group(
+            trades,
+            lambda t: t["ticker"],
+            lambda v: {
+                "ticker":  v["_key"],
+                "trades":  v["_trades"],
+                "winrate": round(v["_wins"] / v["_trades"] * 100, 1),
+                "pnl":     round(v["_pnl"], 2),
+                "avg_rr":  round(sum(v["_rr"]) / len(v["_rr"]), 2) if v["_rr"] else None,
+            }
+        )
+        by_ticker = sorted(tk_map.values(), key=lambda x: x["pnl"], reverse=True)
+
+        st_map = _group(
+            trades,
+            lambda t: t.get("setup_type") or "MANUAL",
+            lambda v: {
+                "type":          v["_key"],
+                "trades":        v["_trades"],
+                "winrate":       round(v["_wins"] / v["_trades"] * 100, 1),
+                "pnl":           round(v["_pnl"], 2),
+                "profit_factor": round(v["_gw"] / v["_gl"], 2) if v["_gl"] > 0 else None,
+            }
+        )
+        by_setup = sorted(st_map.values(), key=lambda x: x["pnl"], reverse=True)
+
+        rg_map = _group(
+            trades,
+            lambda t: t.get("market_regime") or "N/A",
+            lambda v: {
+                "regime":  v["_key"],
+                "trades":  v["_trades"],
+                "winrate": round(v["_wins"] / v["_trades"] * 100, 1),
+                "pnl":     round(v["_pnl"], 2),
+            }
+        )
+        by_regime = sorted(rg_map.values(), key=lambda x: x["pnl"], reverse=True)
+
+        return clean_for_json({
+            "total_trades":    len(trades),
+            "wins":            len(wins),
+            "losses":          len(losses),
+            "be":              len(be),
+            "winrate":         winrate,
+            "profit_factor":   profit_factor,
+            "expectancy":      expectancy,
+            "max_drawdown":    round(max_drawdown, 2),
+            "total_pnl":       round(total_pnl, 2),
+            "avg_rr_realized": avg_rr,
+            "best_trade":      best_trade,
+            "worst_trade":     worst_trade,
+            "equity_curve":    equity_curve,
+            "monthly_returns": monthly_returns,
+            "drawdown_curve":  drawdown_curve,
+            "by_ticker":       by_ticker,
+            "by_setup":        by_setup,
+            "by_regime":       by_regime,
+        })
+    except Exception as e:
+        return clean_for_json(dict(_empty, error=str(e)))
 
 
 # ── Test pages ────────────────────────────────────────────────────────────────

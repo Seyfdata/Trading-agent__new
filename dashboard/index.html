@@ -202,7 +202,15 @@ const DEMO = {
       vix:   { price:  14.20, change: -3.10 },
       dxy:   { price: 103.80, change: -0.12 },
       us10y: { price:   4.28, change:  0.02 }
-    }
+    },
+    macro_indicators: [
+      { symbol: '^IRX', name: 'T-Bill 13W',   price:  5.22, change_pct:  0.02 },
+      { symbol: '^FVX', name: 'Treasury 5Y',  price:  4.31, change_pct:  0.04 },
+      { symbol: '^TNX', name: 'Treasury 10Y', price:  4.28, change_pct:  0.02 },
+      { symbol: '^TYX', name: 'Treasury 30Y', price:  4.52, change_pct:  0.01 },
+      { symbol: 'GC=F', name: 'Gold',         price: 2342.0, change_pct: 0.31 },
+      { symbol: 'CL=F', name: 'WTI Crude',    price:  78.40, change_pct:-0.85 },
+    ]
   },
   macro: {
     verdict: 'GO', risque: '1% normal',
@@ -391,6 +399,64 @@ function RegimeBar(props) {
   );
 }
 
+// ── SHAP-style Score Breakdown ────────────────────────────────────────────
+
+function ShapBar(props) {
+  var label    = props.label;
+  var score    = props.score != null ? props.score : 0;
+  var baseline = props.baseline != null ? props.baseline : 12.5;
+  var maxDev   = props.maxDev   != null ? props.maxDev   : 12.5;
+  var isKey    = props.isKey;
+  var dev      = score - baseline;
+  var pct      = Math.min(Math.abs(dev) / maxDev * 50, 50);
+  var barColor = dev >= 0 ? '#10b981' : '#ef4444';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+      <div style={{ width: 72, fontSize: 10, color: 'var(--muted)', textAlign: 'right', flexShrink: 0 }}>{label}</div>
+      <div style={{ flex: 1, position: 'relative', height: 8 }}>
+        <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'rgba(100,116,139,0.25)' }} />
+        {dev >= 0
+          ? <div style={{ position: 'absolute', left: '50%', top: 0, height: 8, width: pct + '%', background: barColor, borderRadius: '0 4px 4px 0', opacity: 0.85 }} />
+          : <div style={{ position: 'absolute', right: '50%', top: 0, height: 8, width: pct + '%', background: barColor, borderRadius: '4px 0 0 4px', opacity: 0.85 }} />
+        }
+      </div>
+      <div style={{ width: 30, fontSize: 11, fontWeight: 700, color: barColor, textAlign: 'right', flexShrink: 0 }}>{score}</div>
+      <div style={{ width: 14, flexShrink: 0 }}>{isKey && <span title="Key Driver" style={{ fontSize: 11 }}>🔑</span>}</div>
+    </div>
+  );
+}
+
+function ShapScoreBreakdown(props) {
+  var t = props.ticker;
+  var comps = [
+    { label: 'SMA200', score: t.sma200_score || 0 },
+    { label: 'Volume', score: t.volume_score  || 0 },
+    { label: 'Reddit', score: t.reddit_score  || 0 },
+    { label: 'News',   score: t.news_score    || 0 },
+  ];
+  var maxScore  = Math.max.apply(null, comps.map(function(c) { return c.score; }));
+  var hasCross  = t.cross_validation_score != null;
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>
+        SHAP — CONTRIBUTION / 25 <span style={{ opacity: 0.5, marginLeft: 4 }}>baseline 12.5</span>
+      </div>
+      {comps.map(function(c) {
+        return <ShapBar key={c.label} label={c.label} score={c.score} isKey={c.score === maxScore} />;
+      })}
+      {hasCross && (
+        <div style={{ marginTop: 6, borderTop: '1px solid rgba(100,116,139,0.2)', paddingTop: 6 }}>
+          <ShapBar label="Cross-val" score={t.cross_validation_score} baseline={0} maxDev={10}
+            isKey={false} />
+          <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 2, paddingLeft: 80 }}>
+            fiabilité du signal — échelle –10 / +10
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Top 3 ─────────────────────────────────────────────────────────────────
 
 function Top3Section(props) {
@@ -424,17 +490,25 @@ function Top3Section(props) {
                 <div className="t3lbl">/ 100</div>
               </div>
             </div>
-            <div style={{ display: 'grid', gap: 5, marginBottom: 10 }}>
-              {[['SMA200', t.sma200_score], ['Volume', t.volume_score], ['Reddit', t.reddit_score], ['News', t.news_score]].map(function(pair) {
-                return (
-                  <div key={pair[0]} className="row g8">
-                    <span style={{ fontSize: 9, color: 'var(--muted)', width: 46 }}>{pair[0]}</span>
-                    <ScoreBar val={pair[1] || 0} color={color} />
-                    <span style={{ fontSize: 10, color: color, width: 18, textAlign: 'right' }}>{pair[1] || 0}</span>
-                  </div>
-                );
-              })}
-            </div>
+            {(function() {
+              var comps = [
+                { label: 'SMA200', score: t.sma200_score || 0 },
+                { label: 'Volume', score: t.volume_score  || 0 },
+                { label: 'Reddit', score: t.reddit_score  || 0 },
+                { label: 'News',   score: t.news_score    || 0 },
+              ].sort(function(a, b) { return b.score - a.score; });
+              var volStr = (comps[0].label === 'Volume' || comps[1].label === 'Volume') && m.vol_relative
+                ? function(c) { return c.label === 'Volume' ? 'Volume ×' + fmt(m.vol_relative, 1) : c.label + ' ' + c.score + '/25'; }
+                : function(c) { return c.label + ' ' + c.score + '/25'; };
+              return (
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 10, lineHeight: 1.5 }}>
+                  <span style={{ color: '#f59e0b', marginRight: 4 }}>🔑</span>
+                  <span style={{ color: 'var(--text)' }}>{volStr(comps[0])}</span>
+                  <span style={{ margin: '0 4px', opacity: 0.4 }}>·</span>
+                  <span style={{ color: 'var(--text)' }}>{volStr(comps[1])}</span>
+                </div>
+              );
+            })()}
             <div className="row g6 wrap">
               {m.dist_sma200 != null && (
                 <span className={'badge ' + (m.dist_sma200 < 0 ? 'b-bull' : 'b-accent')}>
@@ -557,6 +631,36 @@ function PostMarketSection(props) {
 
 // ── Overview Tab ──────────────────────────────────────────────────────────
 
+function MacroIndicatorsSection(props) {
+  var indicators = props.indicators || [];
+  if (indicators.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div className="stitle">INDICATEURS MACRO</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        {indicators.map(function(ind) {
+          var chg   = ind.change_pct;
+          var color = chgClr(chg);
+          var arrow = chg > 0 ? '▲' : chg < 0 ? '▼' : '—';
+          return (
+            <div key={ind.symbol} className="card" style={{ padding: '8px 12px' }}>
+              <div style={{ fontSize: 9, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 3 }}>
+                {ind.name}
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: ind.price != null ? 'var(--text)' : 'var(--muted)' }}>
+                {ind.price != null ? fmt(ind.price) : '—'}
+              </div>
+              <div style={{ fontSize: 11, color: color, marginTop: 2 }}>
+                {ind.price != null ? arrow + ' ' + fmtPct(chg) : 'N/A'}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function OverviewTab(props) {
   var data             = props.data;
   var postmarketData   = props.postmarketData;
@@ -565,6 +669,7 @@ function OverviewTab(props) {
   var setupsData       = props.setupsData;
   var onGoToSetups     = props.onGoToSetups     || function() {};
   var inst = (data.market && data.market.instruments) ? data.market.instruments : {};
+  var macroInds = (data.market && data.market.macro_indicators) ? data.market.macro_indicators : [];
   var redditItems = (data.reddit && data.reddit.data) ? data.reddit.data.filter(function(r) { return r.in_watchlist; }).slice(0, 5) : [];
   var newsItems = data.news ? [].concat(data.news.ticker_news || [], data.news.market_news || []).slice(0, 5) : [];
 
@@ -578,6 +683,8 @@ function OverviewTab(props) {
         <InstrumentCard name="DOLLAR (DXY)"   data={inst.dxy}   />
         <InstrumentCard name="US 10Y YIELD"   data={inst.us10y} />
       </div>
+
+      <MacroIndicatorsSection indicators={macroInds} />
 
       <RegimeBar market={data.market} macro={data.macro} />
 
@@ -733,16 +840,7 @@ function WatchlistTab(props) {
                   <td colSpan={8}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
                       <div>
-                        <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 10 }}>SOUS-SCORES / 25</div>
-                        {[['SMA200', t.sma200_score, '#10b981'], ['Volume', t.volume_score, '#3b82f6'], ['Reddit', t.reddit_score, '#8b5cf6'], ['News', t.news_score, '#f59e0b']].map(function(p) {
-                          return (
-                            <div key={p[0]} className="row g8" style={{ marginBottom: 7 }}>
-                              <span style={{ fontSize: 10, color: 'var(--muted)', width: 68 }}>{p[0]}</span>
-                              <ScoreBar val={p[1] || 0} color={p[2]} />
-                              <span style={{ fontSize: 11, fontWeight: 700, color: p[2], width: 26, textAlign: 'right' }}>{p[1] || 0}</span>
-                            </div>
-                          );
-                        })}
+                        <ShapScoreBreakdown ticker={t} />
                       </div>
                       <div>
                         <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 10 }}>DÉTAILS</div>
@@ -934,79 +1032,298 @@ function NewsTab(props) {
   );
 }
 
-// ── History Tab ───────────────────────────────────────────────────────────
+// ── Performance Tab ────────────────────────────────────────────────────────
 
-function HistoryTab(props) {
-  var hist = props.data.history || {};
-  var htickers = hist.tickers || {};
-  var tkNames = Object.keys(htickers);
+var _MONTH_NAMES = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+var _TOOLTIP_STYLE = { background: '#111827', border: '1px solid #1e293b', borderRadius: 6, fontFamily: 'JetBrains Mono', fontSize: 11 };
+var _TICK_STYLE    = { fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' };
+var _fmtD          = function(d) { return d ? d.slice(5).replace('-', '/') : ''; };
 
-  var chartData = useMemo(function() {
-    var dateMap = {};
-    tkNames.forEach(function(tk) {
-      var scores = htickers[tk].scores || [];
-      scores.forEach(function(e) {
-        if (!dateMap[e.date]) dateMap[e.date] = { date: e.date };
-        dateMap[e.date][tk] = e.total_score;
-      });
-    });
-    return Object.values(dateMap).sort(function(a, b) { return a.date < b.date ? -1 : 1; });
+function PerfMetricCard(props) {
+  var label = props.label;
+  var value = props.value;
+  var color = props.color || 'var(--text)';
+  var sub   = props.sub;
+  return (
+    <div className="card" style={{ textAlign: 'center', padding: '16px 12px' }}>
+      <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1, color: color }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function EquityCurve(props) {
+  var data = props.data || [];
+  if (!data.length) return null;
+  var vals     = data.map(function(d) { return d.pnl; });
+  var eMax     = Math.max.apply(null, vals.concat([0]));
+  var eMin     = Math.min.apply(null, vals.concat([0]));
+  var zeroOff  = (eMax > 0 && eMin < 0) ? (eMax / (eMax - eMin) * 100).toFixed(1) + '%' : (eMin >= 0 ? '0%' : '100%');
+  var lastVal  = vals[vals.length - 1] || 0;
+  var lineClr  = lastVal >= 0 ? '#10b981' : '#ef4444';
+  return (
+    <div className="card mb16">
+      <div className="stitle" style={{ marginBottom: 14 }}>COURBE D'EQUITY</div>
+      <ResponsiveContainer width="100%" height={220}>
+        <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%"     stopColor="#10b981" stopOpacity={0.35} />
+              <stop offset={zeroOff} stopColor="#10b981" stopOpacity={0.05} />
+              <stop offset={zeroOff} stopColor="#ef4444" stopOpacity={0.05} />
+              <stop offset="95%"    stopColor="#ef4444" stopOpacity={0.35} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+          <XAxis dataKey="date" tickFormatter={_fmtD} tick={_TICK_STYLE} axisLine={false} tickLine={false} />
+          <YAxis tick={_TICK_STYLE} axisLine={false} tickLine={false} tickFormatter={function(v) { return '$' + v; }} />
+          <Tooltip contentStyle={_TOOLTIP_STYLE} formatter={function(v) { return ['$' + v, 'PnL cumulé']; }} labelFormatter={_fmtD} />
+          <Area type="monotone" dataKey="pnl" stroke={lineClr} strokeWidth={2} fill="url(#eqGrad)" dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function MonthlyHeatmap(props) {
+  var data = props.data || [];
+  if (!data.length) return null;
+  var monthMap = {};
+  data.forEach(function(m) { monthMap[m.month] = m; });
+  var years = [];
+  data.forEach(function(m) { var y = m.month.slice(0, 4); if (years.indexOf(y) === -1) years.push(y); });
+  years.sort();
+  var allAbs = data.map(function(m) { return Math.abs(m.pnl); });
+  var maxAbs = Math.max.apply(null, allAbs.concat([1]));
+  return (
+    <div className="card mb16">
+      <div className="stitle" style={{ marginBottom: 14 }}>RETOURS MENSUELS</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 4 }}>
+          <thead>
+            <tr>
+              <th style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textAlign: 'left', paddingRight: 8, width: 40 }}>Année</th>
+              {_MONTH_NAMES.map(function(mn) {
+                return <th key={mn} style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textAlign: 'center', width: 60 }}>{mn}</th>;
+              })}
+              <th style={{ fontSize: 10, color: 'var(--muted)', fontWeight: 700, textAlign: 'right', paddingLeft: 8 }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {years.map(function(year) {
+              var yearTotal = 0;
+              return (
+                <tr key={year}>
+                  <td style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', paddingRight: 8 }}>{year}</td>
+                  {_MONTH_NAMES.map(function(_, mi) {
+                    var key  = year + '-' + String(mi + 1).padStart(2, '0');
+                    var cell = monthMap[key];
+                    if (cell) yearTotal += cell.pnl;
+                    var intensity = cell ? Math.min(0.8, 0.15 + Math.abs(cell.pnl) / maxAbs * 0.65) : 0;
+                    var bg = cell
+                      ? (cell.pnl >= 0 ? 'rgba(16,185,129,' + intensity + ')' : 'rgba(239,68,68,' + intensity + ')')
+                      : 'rgba(30,41,59,0.3)';
+                    return (
+                      <td key={mi} style={{ textAlign: 'center', padding: '5px 2px' }}>
+                        <div style={{ background: bg, borderRadius: 4, padding: '5px 2px', minHeight: 36, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                          {cell ? (
+                            <>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: cell.pnl >= 0 ? '#10b981' : '#ef4444' }}>
+                                {cell.pnl >= 0 ? '+' : ''}{Math.round(cell.pnl)}$
+                              </div>
+                              <div style={{ fontSize: 9, color: 'var(--muted)' }}>{cell.winrate}%</div>
+                            </>
+                          ) : <span style={{ color: 'var(--dim)', fontSize: 10 }}>—</span>}
+                        </div>
+                      </td>
+                    );
+                  })}
+                  <td style={{ textAlign: 'right', paddingLeft: 8, fontSize: 11, fontWeight: 700, color: yearTotal >= 0 ? '#10b981' : '#ef4444' }}>
+                    {yearTotal >= 0 ? '+' : ''}{Math.round(yearTotal)}$
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function DrawdownChart(props) {
+  var data = props.data || [];
+  var maxDD = props.maxDrawdown || 0;
+  if (!data.length) return null;
+  var vals   = data.map(function(d) { return d.drawdown; });
+  var minVal = Math.min.apply(null, vals.concat([0]));
+  var domain = [Math.floor(minVal * 1.1), 0];
+  return (
+    <div className="card mb16">
+      <div className="rowb" style={{ marginBottom: 14 }}>
+        <div className="stitle" style={{ marginBottom: 0 }}>ANALYSE DRAWDOWN</div>
+        <div style={{ fontSize: 11 }}>
+          <span style={{ color: 'var(--muted)' }}>Max DD : </span>
+          <span style={{ color: '#ef4444', fontWeight: 700 }}>${Math.abs(maxDD).toFixed(0)}</span>
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={160}>
+        <AreaChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id="ddGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.5} />
+              <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+          <XAxis dataKey="date" tickFormatter={_fmtD} tick={_TICK_STYLE} axisLine={false} tickLine={false} />
+          <YAxis domain={domain} tick={_TICK_STYLE} axisLine={false} tickLine={false} tickFormatter={function(v) { return '$' + v; }} />
+          <Tooltip contentStyle={_TOOLTIP_STYLE} formatter={function(v) { return ['$' + v, 'Drawdown']; }} labelFormatter={_fmtD} />
+          <Area type="monotone" dataKey="drawdown" stroke="#ef4444" strokeWidth={2} fill="url(#ddGrad)" dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function EdgeTable(props) {
+  var title   = props.title;
+  var rows    = props.rows || [];
+  var columns = props.columns || [];
+  if (!rows.length) return (
+    <div className="card"><div className="stitle" style={{ marginBottom: 8 }}>{title}</div><div style={{ color: 'var(--muted)', fontSize: 11, textAlign: 'center', padding: 16 }}>Aucune donnée</div></div>
+  );
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="stitle" style={{ padding: '12px 16px 10px' }}>{title}</div>
+      <table className="tbl">
+        <thead>
+          <tr>{columns.map(function(c) { return <th key={c.key}>{c.label}</th>; })}</tr>
+        </thead>
+        <tbody>
+          {rows.map(function(row, i) {
+            return (
+              <tr key={i}>
+                {columns.map(function(c) {
+                  var val = row[c.key];
+                  var color = c.color ? c.color(val, row) : 'var(--text)';
+                  return <td key={c.key} style={{ color: color, fontWeight: c.bold ? 700 : 400 }}>{c.fmt ? c.fmt(val) : val}</td>;
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PerformanceTab() {
+  var ps = useState(null);  var perf = ps[0];     var setPerf = ps[1];
+  var ls = useState(true);  var loading = ls[0];  var setLoading = ls[1];
+  var es = useState(null);  var err = es[0];      var setErr = es[1];
+
+  useEffect(function() {
+    setLoading(true);
+    fetch('/api/performance')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setPerf(d); setLoading(false); })
+      .catch(function(e) { setErr(String(e)); setLoading(false); });
   }, []);
 
-  var fmtD = function(d) { return d ? d.slice(5).replace('-', '/') : ''; };
+  if (loading) return <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>Chargement des statistiques...</div>;
+  if (err)     return <div className="card" style={{ color: 'var(--bear)', padding: 20 }}>Erreur : {err}</div>;
+  if (!perf)   return null;
 
-  if (!tkNames.length) {
-    return <div className="card"><div className="mc" style={{ padding: 20, textAlign: 'center' }}>Aucun historique disponible</div></div>;
-  }
+  var isEmpty = perf.total_trades === 0;
+
+  var pnlColor = isEmpty ? 'var(--muted)' : (perf.total_pnl >= 0 ? '#10b981' : '#ef4444');
+  var wrColor  = isEmpty ? 'var(--muted)' : (perf.winrate >= 50   ? '#10b981' : '#ef4444');
+  var pfColor  = isEmpty ? 'var(--muted)' : (perf.profit_factor != null && perf.profit_factor >= 1.5 ? '#10b981' : 'var(--neutral)');
+  var ddColor  = '#ef4444';
+  var exColor  = isEmpty ? 'var(--muted)' : (perf.expectancy >= 0 ? '#10b981' : '#ef4444');
 
   return (
     <div>
-      <div className="row g8 wrap mb16">
-        {tkNames.map(function(tk) {
-          var t = htickers[tk];
-          var trendCls = t.trend === 'HAUSSE' ? 'b-bull' : t.trend === 'BAISSE' ? 'b-bear' : 'b-muted';
-          var arrow = t.trend === 'HAUSSE' ? '↑' : t.trend === 'BAISSE' ? '↓' : '→';
-          return (
-            <div key={tk} className="card card-sm row g8" style={{ padding: '7px 12px' }}>
-              <span style={{ fontWeight: 700 }}>{tk}</span>
-              <span className={'badge ' + trendCls}>{arrow} {t.delta > 0 ? '+' : ''}{t.delta}</span>
+      {isEmpty && (
+        <div className="card mb16" style={{ textAlign: 'center', padding: '32px 24px' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>📊</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Aucun trade enregistré</div>
+          <div style={{ color: 'var(--muted)', fontSize: 12, maxWidth: 440, margin: '0 auto' }}>
+            Utilise l'onglet Journal pour enregistrer tes premiers trades et voir tes statistiques ici !
+          </div>
+        </div>
+      )}
+
+      {/* ── 6 Métriques ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 16 }}>
+        <PerfMetricCard label="Total PnL"    value={isEmpty ? '—' : (perf.total_pnl >= 0 ? '+' : '') + '$' + Math.abs(perf.total_pnl).toFixed(0)} color={pnlColor}
+          sub={isEmpty ? null : (perf.best_trade ? '↑ ' + perf.best_trade.ticker : null)} />
+        <PerfMetricCard label="Winrate"      value={isEmpty ? '—' : perf.winrate + '%'} color={wrColor}
+          sub={isEmpty ? null : perf.wins + 'W / ' + perf.losses + 'L' + (perf.be ? ' / ' + perf.be + 'BE' : '')} />
+        <PerfMetricCard label="Profit Factor" value={isEmpty ? '—' : (perf.profit_factor != null ? perf.profit_factor + 'x' : 'N/A')} color={pfColor}
+          sub={isEmpty ? null : '≥ 1.5 conseillé'} />
+        <PerfMetricCard label="Max Drawdown" value={isEmpty ? '—' : '-$' + Math.abs(perf.max_drawdown).toFixed(0)} color={isEmpty ? 'var(--muted)' : ddColor}
+          sub={null} />
+        <PerfMetricCard label="Expectancy"   value={isEmpty ? '—' : (perf.expectancy >= 0 ? '+' : '') + '$' + perf.expectancy.toFixed(0)} color={exColor}
+          sub="par trade" />
+        <PerfMetricCard label="Trades"       value={isEmpty ? '0' : perf.total_trades} color="var(--accent)"
+          sub={isEmpty ? null : (perf.avg_rr_realized != null ? 'Avg RR ' + perf.avg_rr_realized + 'R' : null)} />
+      </div>
+
+      {!isEmpty && (
+        <>
+          <EquityCurve data={perf.equity_curve} />
+
+          <div className="g2 mb16">
+            <MonthlyHeatmap data={perf.monthly_returns} />
+            <DrawdownChart  data={perf.drawdown_curve} maxDrawdown={perf.max_drawdown} />
+          </div>
+
+          {/* ── Edge Tracker ── */}
+          <div className="stitle">EDGE TRACKER</div>
+          <div className="g2">
+            <EdgeTable
+              title="Par Ticker"
+              rows={perf.by_ticker}
+              columns={[
+                { key: 'ticker',  label: 'Ticker',  bold: true },
+                { key: 'trades',  label: 'Trades' },
+                { key: 'winrate', label: 'WR %',   fmt: function(v) { return v + '%'; }, color: function(v) { return v >= 50 ? '#10b981' : '#ef4444'; } },
+                { key: 'pnl',     label: 'PnL',    fmt: function(v) { return (v >= 0 ? '+' : '') + '$' + v.toFixed(0); }, color: function(v) { return v >= 0 ? '#10b981' : '#ef4444'; } },
+                { key: 'avg_rr',  label: 'Avg RR', fmt: function(v) { return v != null ? v + 'R' : '—'; }, color: function(v) { return v != null && v >= 2 ? '#10b981' : 'var(--muted)'; } },
+              ]}
+            />
+            <EdgeTable
+              title="Par Setup"
+              rows={perf.by_setup}
+              columns={[
+                { key: 'type',          label: 'Setup',  bold: true, fmt: function(v) { return v.replace('_', ' '); } },
+                { key: 'trades',        label: 'Trades' },
+                { key: 'winrate',       label: 'WR %',   fmt: function(v) { return v + '%'; }, color: function(v) { return v >= 50 ? '#10b981' : '#ef4444'; } },
+                { key: 'pnl',           label: 'PnL',    fmt: function(v) { return (v >= 0 ? '+' : '') + '$' + v.toFixed(0); }, color: function(v) { return v >= 0 ? '#10b981' : '#ef4444'; } },
+                { key: 'profit_factor', label: 'PF',     fmt: function(v) { return v != null ? v + 'x' : '—'; }, color: function(v) { return v != null && v >= 1.5 ? '#10b981' : 'var(--muted)'; } },
+              ]}
+            />
+          </div>
+
+          {perf.by_regime && perf.by_regime.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <EdgeTable
+                title="Par Régime de Marché"
+                rows={perf.by_regime}
+                columns={[
+                  { key: 'regime',  label: 'Régime', bold: true },
+                  { key: 'trades',  label: 'Trades' },
+                  { key: 'winrate', label: 'WR %',   fmt: function(v) { return v + '%'; }, color: function(v) { return v >= 50 ? '#10b981' : '#ef4444'; } },
+                  { key: 'pnl',     label: 'PnL',    fmt: function(v) { return (v >= 0 ? '+' : '') + '$' + v.toFixed(0); }, color: function(v) { return v >= 0 ? '#10b981' : '#ef4444'; } },
+                ]}
+              />
             </div>
-          );
-        })}
-      </div>
-      <div className="card">
-        <div className="stitle" style={{ marginBottom: 14 }}>ÉVOLUTION DES SCORES — {hist.days || 14} DERNIERS JOURS</div>
-        <ResponsiveContainer width="100%" height={320}>
-          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-            <defs>
-              {tkNames.map(function(tk, i) {
-                var c = CHART_COLORS[i % CHART_COLORS.length];
-                return (
-                  <linearGradient key={tk} id={'grad' + i} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor={c} stopOpacity={0.25} />
-                    <stop offset="95%" stopColor={c} stopOpacity={0}    />
-                  </linearGradient>
-                );
-              })}
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-            <XAxis dataKey="date" tickFormatter={fmtD} tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis domain={[0, 100]} tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1e293b', borderRadius: 6, fontFamily: 'JetBrains Mono', fontSize: 11 }} />
-            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 12, fontFamily: 'JetBrains Mono' }} />
-            {tkNames.map(function(tk, i) {
-              var c = CHART_COLORS[i % CHART_COLORS.length];
-              return (
-                <Area key={tk} type="monotone" dataKey={tk}
-                  stroke={c} strokeWidth={2} fill={'url(#grad' + i + ')'}
-                  connectNulls={true} dot={false}
-                  activeDot={{ r: 4, strokeWidth: 0 }}
-                />
-              );
-            })}
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -1707,7 +2024,7 @@ var TABS = [
   { id: 'alerts',    label: '⚡ Alertes'          },
   { id: 'setups',    label: '🎯 Setups'           },
   { id: 'journal',   label: '📝 Journal'          },
-  { id: 'history',   label: '📅 Historique'       }
+  { id: 'history',   label: '📊 Performance'      }
 ];
 
 // Ref module-level pour éviter les stale closures dans setInterval
@@ -2006,7 +2323,7 @@ function TradingDashboard() {
         {tab === 'alerts'    && <AlertsTab alertData={alertData} liveNews={liveNews} countdown={(alertData.in_killzone || testMode) ? countdown : null} testMode={testMode} onSimulate={activateTestMode} />}
         {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} />}
         {tab === 'journal'   && <ErrorBoundary><JournalTab /></ErrorBoundary>}
-        {tab === 'history'   && <HistoryTab   data={data} />}
+        {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}
       </main>
       <footer style={{ padding: '8px 24px', borderTop: '1px solid var(--border)', background: 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span className="mc" style={{ fontSize: 10 }}>Données live — Killzone 14h30-16h30 CET</span>
