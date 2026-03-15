@@ -8,7 +8,8 @@
       "Bash(ls .env*)",
       "Bash(python -c \"from database.models import init_db; init_db\\(\\); print\\(''DB OK''\\)\")",
       "Bash(python -c \"from config.settings import WATCHLIST; print\\(f''{len\\(WATCHLIST\\)} tickers OK''\\)\")",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(git commit -m \"Phase 2B Sprint 5+6 : journal trading, performance, indicateurs macro:*)"
     ]
   }
 }
