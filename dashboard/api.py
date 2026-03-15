@@ -5,16 +5,22 @@ Lance avec :
     python -m uvicorn dashboard.api:app --reload --port 8000
 
 Endpoints :
-    GET  /api/market       — contexte marché scoré
-    GET  /api/tickers      — watchlist scorée + classée
-    GET  /api/reddit       — données Reddit (lecture fichiers existants)
-    GET  /api/news         — news filtrées avec sentiment
-    GET  /api/macro        — calendrier macro du jour
-    GET  /api/history      — historique des scores (14j)
-    GET  /api/alerts       — alertes killzone intraday
-    GET  /api/alerts/news  — nouvelles news depuis le dernier appel
-    GET  /api/postmarket   — résumé post-market (top gainers/losers, marché, alertes)
-    POST /api/refresh      — lance un scan complet en arrière-plan
+    GET  /api/market               — contexte marché scoré
+    GET  /api/tickers              — watchlist scorée + classée
+    GET  /api/reddit               — données Reddit (lecture fichiers existants)
+    GET  /api/news                 — news filtrées avec sentiment
+    GET  /api/macro                — calendrier macro du jour
+    GET  /api/history              — historique des scores (14j)
+    GET  /api/alerts               — alertes killzone intraday
+    GET  /api/alerts/news          — nouvelles news depuis le dernier appel
+    GET  /api/postmarket           — résumé post-market (top gainers/losers, marché, alertes)
+    GET  /api/setups               — setups détectés (DISCOUNT_ZONE, SMA200_BOUNCE, MOMENTUM)
+    POST /api/refresh              — lance un scan complet en arrière-plan
+    POST /api/trades               — créer un nouveau trade
+    GET  /api/trades               — liste tous les trades (params: status, limit)
+    GET  /api/trades/{trade_id}    — un trade spécifique
+    PUT  /api/trades/{trade_id}/close — clôturer un trade
+    DELETE /api/trades/{trade_id}  — supprimer un trade
 """
 
 import json
@@ -24,7 +30,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
@@ -66,11 +72,13 @@ from scrapers.rss_news import fetch_and_filter
 from scrapers.macro_calendar import (
     detect_recurring_events, check_earnings_today, get_trading_recommendation,
 )
-from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv
+from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv, is_known_ticker
 from analysis.scoring import score_ticker, score_market_context, rank_tickers
+from analysis.reddit_trend import get_reddit_trends, save_today_snapshot, verify_ticker
 from database.models import (
     init_db, save_scores, save_market_context,
     get_score_history, get_score_trend,
+    save_trade, get_all_trades, get_trade_by_id, close_trade, delete_trade,
 )
 
 # ── App ─────────────────────────────────────────────────────────────────────
@@ -266,7 +274,13 @@ def get_tickers():
 
 @app.get("/api/reddit")
 def get_reddit():
-    """Données Reddit depuis les fichiers existants (ne lance pas le scanner)."""
+    """
+    Données Reddit enrichies :
+      - tendance 5 jours (RISING / FALLING / STABLE / NEW)
+      - verified    : ticker connu (VALID_TICKERS ou watchlist) ou confirmé yfinance
+      - cross_validated : mentionné Reddit + dans les news RSS
+    Ne relance pas le scanner — lit les fichiers existants.
+    """
     try:
         scanner_dir = find_scanner_dir()
         if scanner_dir is None:
@@ -276,9 +290,27 @@ def get_reddit():
         if df is None or df.empty:
             return {"error": "Pas de données Reddit (CSV vide)", "data": []}
 
-        # Lire les signaux JSON si disponible
-        signals_path = scanner_dir / "reddit_sentiment_signals.json"
+        # ── 1. Snapshot journalier ────────────────────────────────────────────
+        csv_path = scanner_dir / "reddit_watchlist.csv"
+        snapshots_dir = scanner_dir / "snapshots"
+        save_today_snapshot(csv_path, snapshots_dir)
+
+        # ── 2. Tendances 5 jours ──────────────────────────────────────────────
+        trends = get_reddit_trends(snapshots_dir)
+
+        # ── 3. Tickers news (cross-validation) ───────────────────────────────
+        news_tickers: set = set()
+        try:
+            _, ticker_news, _, _ = fetch_and_filter(max_per_feed=3)
+            for n in ticker_news:
+                for t in n.get("matched_tickers", []):
+                    news_tickers.add(str(t).upper())
+        except Exception:
+            pass  # non bloquant
+
+        # ── 4. Signaux JSON ───────────────────────────────────────────────────
         signals_by_ticker = {}
+        signals_path = scanner_dir / "reddit_sentiment_signals.json"
         if signals_path.exists():
             try:
                 with open(signals_path, "r", encoding="utf-8") as f:
@@ -290,6 +322,9 @@ def get_reddit():
             except Exception:
                 pass
 
+        watchlist_set = set(WATCHLIST)
+
+        # ── 5. Construction des lignes ────────────────────────────────────────
         rows = []
         for _, row in df.iterrows():
             ticker = str(row.get("Ticker", "")).strip()
@@ -300,6 +335,23 @@ def get_reddit():
             style = str(row.get("Trade_Style", "?"))
             subreddits = row.get("Subreddits", "")
 
+            # Tendance 5 jours
+            td = trends.get(ticker, {
+                "mentions_today": mentions,
+                "mentions_avg_5d": None,
+                "trend": "NEW",
+                "trend_pct": None,
+            })
+
+            # Vérification ticker : connu statiquement OU confirmé yfinance
+            in_wl = ticker in watchlist_set
+            known = is_known_ticker(ticker)
+            if not known:
+                known = verify_ticker(ticker)  # appel yfinance avec cache
+
+            # Cross-validation : Reddit ET news
+            cross_validated = ticker in news_tickers
+
             rows.append({
                 "ticker": ticker,
                 "mentions": mentions,
@@ -308,11 +360,24 @@ def get_reddit():
                 "trade_style": style,
                 "subreddits": str(subreddits).split(",") if subreddits else [],
                 "signals": signals_by_ticker.get(ticker, {}),
-                "in_watchlist": ticker in WATCHLIST,
+                "in_watchlist": in_wl,
+                # Nouveaux champs ───────────────────────────────────────────
+                "verified": known,
+                "cross_validated": cross_validated,
+                "trend": td.get("trend", "NEW"),
+                "trend_pct": td.get("trend_pct"),
+                "mentions_avg_5d": td.get("mentions_avg_5d"),
             })
 
-        # Trier par mentions décroissantes
-        rows.sort(key=lambda x: x["mentions"], reverse=True)
+        # ── 6. Tri : vérifiés + cross-validés en premier, puis mentions desc ─
+        def _sort_key(r):
+            if r["verified"] and r["cross_validated"]:
+                return (0, -r["mentions"])
+            if r["verified"]:
+                return (1, -r["mentions"])
+            return (2, -r["mentions"])
+
+        rows.sort(key=_sort_key)
 
         return {
             "count": len(rows),
@@ -699,6 +764,41 @@ def get_alerts_news():
         return {"new_news": [], "total_checked": 0, "error": str(e)}
 
 
+# ── Setup detector ───────────────────────────────────────────────────────────
+
+@app.get("/api/setups")
+def get_setups():
+    """Setups détectés sur la watchlist : DISCOUNT_ZONE, SMA200_BOUNCE, MOMENTUM."""
+    try:
+        import os
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+        except ImportError:
+            pass
+        from analysis.setup_detector import detect_setups, calculate_position_size
+        capital = float(os.getenv("CAPITAL", 10000))
+
+        setups = detect_setups()
+        enriched = []
+        for s in setups:
+            pos = calculate_position_size(s["entry"], s["stop"], capital)
+            enriched.append({**s, "position": pos})
+
+        return clean_for_json({
+            "count":      len(enriched),
+            "setups":     enriched,
+            "capital":    capital,
+            "scanned_at": datetime.now().isoformat(),
+        })
+    except Exception as e:
+        return clean_for_json({
+            "count": 0, "setups": [], "capital": 0,
+            "scanned_at": datetime.now().isoformat(),
+            "error": str(e),
+        })
+
+
 # ── Post-market summary ───────────────────────────────────────────────────────
 
 @app.get("/api/postmarket")
@@ -780,7 +880,94 @@ def get_postmarket():
         return clean_for_json(dict(_empty, error=str(e)))
 
 
-# ── Test page ─────────────────────────────────────────────────────────────────
+# ── Journal de trading ────────────────────────────────────────────────────────
+
+@app.post("/api/trades")
+async def create_trade(request: Request):
+    """Crée un nouveau trade OPEN.
+    Body JSON requis : ticker, entry_price, stop_price, target_price, shares.
+    Optionnels : setup_type, direction, notes, score_at_entry, market_regime.
+    """
+    try:
+        body = await request.json()
+        required = ("ticker", "entry_price", "stop_price", "target_price", "shares")
+        missing = [f for f in required if f not in body]
+        if missing:
+            return {"error": f"Champs manquants : {', '.join(missing)}"}
+        trade_id = save_trade(body)
+        trade = get_trade_by_id(trade_id)
+        return clean_for_json({"id": trade_id, "trade": trade})
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/trades")
+def list_trades(status: str = None, limit: int = 100):
+    """Liste tous les trades triés par date décroissante.
+    Params optionnels : status (OPEN/CLOSED_WIN/CLOSED_LOSS/CLOSED_BE), limit.
+    """
+    try:
+        trades = get_all_trades(limit=limit, status=status)
+        return clean_for_json({
+            "count": len(trades),
+            "trades": trades,
+        })
+    except Exception as e:
+        return {"error": str(e), "trades": []}
+
+
+@app.get("/api/trades/{trade_id}")
+def get_trade(trade_id: int):
+    """Retourne un trade par son id."""
+    try:
+        trade = get_trade_by_id(trade_id)
+        if trade is None:
+            return {"error": f"Trade {trade_id} introuvable"}
+        return clean_for_json({"trade": trade})
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.put("/api/trades/{trade_id}/close")
+async def close_trade_endpoint(trade_id: int, request: Request):
+    """Clôture un trade et calcule automatiquement PnL, R:R réalisé et statut.
+    Body JSON requis : close_price.
+    Optionnel : notes.
+    """
+    try:
+        body = await request.json()
+        if "close_price" not in body:
+            return {"error": "close_price requis"}
+        trade = close_trade(trade_id, float(body["close_price"]), body.get("notes"))
+        if trade is None:
+            return {"error": f"Trade {trade_id} introuvable"}
+        return clean_for_json({"trade": trade})
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/trades/{trade_id}")
+def delete_trade_endpoint(trade_id: int):
+    """Supprime un trade définitivement."""
+    try:
+        ok = delete_trade(trade_id)
+        if not ok:
+            return {"error": f"Trade {trade_id} introuvable"}
+        return {"deleted": True, "id": trade_id}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ── Test pages ────────────────────────────────────────────────────────────────
+
+@app.get("/journal-test", response_class=HTMLResponse)
+def serve_journal_test():
+    """Page de test isolée pour le composant JournalTab."""
+    p = Path(__file__).parent / "journal_test.html"
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+    return HTMLResponse("<h1>journal_test.html introuvable</h1>", status_code=404)
+
 
 @app.get("/test", response_class=HTMLResponse)
 def serve_test():
@@ -792,10 +979,18 @@ def serve_test():
 # ── Dashboard HTML ────────────────────────────────────────────────────────────
 
 @app.get("/dashboard")
-def serve_dashboard():
-    """Sert le fichier dashboard/index.html."""
+def serve_dashboard(response: Response):
+    """Sert le fichier dashboard/index.html avec headers no-cache."""
     if DASHBOARD_HTML.exists():
-        return FileResponse(DASHBOARD_HTML, media_type="text/html")
+        content = DASHBOARD_HTML.read_text(encoding="utf-8")
+        return HTMLResponse(
+            content=content,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
     return {"error": f"Dashboard introuvable : {DASHBOARD_HTML}"}
 
 
@@ -818,5 +1013,11 @@ def root():
             "GET  /api/history",
             "POST /api/refresh",
             "GET  /api/postmarket",
+            "GET  /api/setups",
+            "POST /api/trades",
+            "GET  /api/trades",
+            "GET  /api/trades/{id}",
+            "PUT  /api/trades/{id}/close",
+            "DELETE /api/trades/{id}",
         ],
     }

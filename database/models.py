@@ -36,6 +36,29 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 spy_change  REAL,
                 dxy         REAL
             );
+
+            CREATE TABLE IF NOT EXISTS trades (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                date_open        TEXT NOT NULL,
+                date_close       TEXT,
+                ticker           TEXT NOT NULL,
+                direction        TEXT NOT NULL DEFAULT 'LONG',
+                setup_type       TEXT NOT NULL DEFAULT 'MANUAL',
+                entry_price      REAL NOT NULL,
+                stop_price       REAL NOT NULL,
+                target_price     REAL NOT NULL,
+                close_price      REAL,
+                shares           INTEGER NOT NULL,
+                risk_dollars     REAL,
+                risk_pct         REAL,
+                rr_planned       REAL,
+                rr_realized      REAL,
+                pnl_dollars      REAL,
+                status           TEXT NOT NULL DEFAULT 'OPEN',
+                notes            TEXT,
+                score_at_entry   INTEGER,
+                market_regime    TEXT
+            );
         """)
 
 
@@ -155,6 +178,169 @@ def get_score_trend(ticker: str, days: int = 7, db_path: Path = DB_PATH) -> dict
         "delta": delta,
         "history": [(row["date"], row["total_score"]) for row in history],
     }
+
+
+# ── Journal de trading ──────────────────────────────────────────────────────
+
+def save_trade(trade_dict: dict, db_path: Path = DB_PATH) -> int:
+    """
+    Enregistre un nouveau trade OPEN.
+
+    Champs requis : ticker, entry_price, stop_price, target_price, shares
+    Champs optionnels : setup_type, direction, notes, score_at_entry,
+                        market_regime, risk_pct, date_open
+
+    Retourne l'id du trade créé.
+    """
+    entry  = float(trade_dict["entry_price"])
+    stop   = float(trade_dict["stop_price"])
+    target = float(trade_dict["target_price"])
+    shares = int(trade_dict["shares"])
+
+    risk_per_share = entry - stop
+    risk_dollars   = round(risk_per_share * shares, 2) if risk_per_share > 0 else 0.0
+    rr_planned     = round((target - entry) / risk_per_share, 2) if risk_per_share > 0 else 0.0
+    date_open      = trade_dict.get("date_open", datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO trades
+                (date_open, ticker, direction, setup_type, entry_price, stop_price,
+                 target_price, shares, risk_dollars, risk_pct, rr_planned, status,
+                 notes, score_at_entry, market_regime)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)
+            """,
+            (
+                date_open,
+                trade_dict["ticker"].upper(),
+                trade_dict.get("direction", "LONG"),
+                trade_dict.get("setup_type", "MANUAL"),
+                entry, stop, target, shares,
+                risk_dollars,
+                trade_dict.get("risk_pct"),
+                rr_planned,
+                trade_dict.get("notes"),
+                trade_dict.get("score_at_entry"),
+                trade_dict.get("market_regime"),
+            ),
+        )
+        return cursor.lastrowid
+
+
+def update_trade(trade_id: int, updates: dict, db_path: Path = DB_PATH) -> None:
+    """Met à jour les champs d'un trade existant."""
+    _ALLOWED = {
+        "date_open", "date_close", "ticker", "direction", "setup_type",
+        "entry_price", "stop_price", "target_price", "close_price", "shares",
+        "risk_dollars", "risk_pct", "rr_planned", "rr_realized", "pnl_dollars",
+        "status", "notes", "score_at_entry", "market_regime",
+    }
+    clean = {k: v for k, v in updates.items() if k in _ALLOWED}
+    if not clean:
+        return
+    set_clause = ", ".join(f"{k} = ?" for k in clean)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            f"UPDATE trades SET {set_clause} WHERE id = ?",
+            list(clean.values()) + [trade_id],
+        )
+
+
+def close_trade(trade_id: int, close_price: float, notes: str | None = None,
+                db_path: Path = DB_PATH) -> dict | None:
+    """
+    Clôture un trade et calcule automatiquement :
+    - pnl_dollars  = (close_price - entry_price) * shares
+    - rr_realized  = (close_price - entry_price) / (entry_price - stop_price)
+    - status       = CLOSED_WIN / CLOSED_LOSS / CLOSED_BE
+
+    Règle status :
+      close >= target          → CLOSED_WIN
+      close <= stop            → CLOSED_LOSS
+      |pnl| <= 0.5R            → CLOSED_BE
+      sinon                    → CLOSED_WIN / CLOSED_LOSS selon pnl
+
+    Retourne le trade mis à jour, ou None si introuvable.
+    """
+    trade = get_trade_by_id(trade_id, db_path=db_path)
+    if trade is None:
+        return None
+
+    entry  = float(trade["entry_price"])
+    stop   = float(trade["stop_price"])
+    target = float(trade["target_price"])
+    shares = int(trade["shares"])
+    risk   = entry - stop
+
+    pnl_dollars = round((close_price - entry) * shares, 2)
+    rr_realized = round((close_price - entry) / risk, 2) if risk != 0 else 0.0
+
+    if close_price >= target:
+        status = "CLOSED_WIN"
+    elif close_price <= stop:
+        status = "CLOSED_LOSS"
+    elif risk != 0 and abs(close_price - entry) <= abs(risk) * 0.5:
+        status = "CLOSED_BE"
+    else:
+        status = "CLOSED_WIN" if pnl_dollars > 0 else "CLOSED_LOSS"
+
+    upd: dict = {
+        "date_close":  datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "close_price": close_price,
+        "pnl_dollars": pnl_dollars,
+        "rr_realized": rr_realized,
+        "status":      status,
+    }
+    if notes:
+        upd["notes"] = notes
+    update_trade(trade_id, upd, db_path=db_path)
+    return get_trade_by_id(trade_id, db_path=db_path)
+
+
+def get_open_trades(db_path: Path = DB_PATH) -> list[dict]:
+    """Retourne tous les trades avec status=OPEN, triés par date décroissante."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM trades WHERE status = 'OPEN' ORDER BY date_open DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_trades(limit: int = 100, status: str | None = None,
+                   db_path: Path = DB_PATH) -> list[dict]:
+    """Retourne tous les trades, triés par date décroissante."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status = ? ORDER BY date_open DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM trades ORDER BY date_open DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_trade_by_id(trade_id: int, db_path: Path = DB_PATH) -> dict | None:
+    """Retourne un trade par son id, ou None s'il n'existe pas."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT * FROM trades WHERE id = ?", (trade_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_trade(trade_id: int, db_path: Path = DB_PATH) -> bool:
+    """Supprime un trade. Retourne True si un enregistrement a été supprimé."""
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute("DELETE FROM trades WHERE id = ?", (trade_id,))
+    return cursor.rowcount > 0
 
 
 # ── Test basique ────────────────────────────────────────────────────────────

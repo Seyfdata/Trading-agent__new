@@ -117,6 +117,53 @@ def _reddit_score(reddit_data: dict) -> tuple[int, str]:
     return min(score, 25), detail
 
 
+# ── Score croisement Reddit × News × Tendance (–10 à +10) ──────────────────
+
+def _cross_validation_score(
+    reddit_data: dict,
+    news_data: dict,
+    trend_data: dict = None,
+    in_watchlist: bool = True,
+) -> tuple[int, str]:
+    """
+    Mesure la fiabilité du signal Reddit par croisement avec d'autres sources.
+
+    Règles :
+        +5   Reddit mentionné ET dans les news RSS (confirmation multi-source)
+        +3   Reddit mentionné ET tendance RISING sur 5 jours
+        -5   Reddit mentionné MAIS ni dans les news NI dans la watchlist
+             (signal isolé, probablement bruit ou penny stock)
+
+    Les bonus se cumulent. Le résultat est plafonné à [–10, +10].
+    """
+    mentions = reddit_data.get("mentions", 0)
+    if mentions == 0:
+        return 0, "no_reddit"
+
+    bonus = 0
+    flags = []
+
+    in_news = (news_data.get("ticker_matches", 0) > 0)
+    is_rising = bool(trend_data and trend_data.get("trend") == "RISING")
+
+    if in_news:
+        bonus += 5
+        flags.append("reddit+news")
+
+    if is_rising:
+        bonus += 3
+        flags.append("trending_rising")
+
+    if not in_news and not in_watchlist:
+        bonus -= 5
+        flags.append("isolated_signal")
+
+    score = max(-10, min(10, bonus))
+    detail = "+".join(flags) if flags else "neutral"
+
+    return score, detail
+
+
 # ── Score News (0-25) ───────────────────────────────────────────────────────
 
 def _news_score(news_data: dict) -> tuple[int, str]:
@@ -153,27 +200,35 @@ def score_ticker(
     market_data: dict,
     reddit_data: dict,
     news_data: dict,
+    trend_data: dict = None,
+    in_watchlist: bool = True,
 ) -> dict:
     """
     Calcule le score composite (0-100) pour un ticker.
 
     Paramètres
     ----------
-    ticker      : str   — symbole boursier (ex: "NVDA")
-    market_data : dict  — données de marché (prix, SMA200, volume…)
-    reddit_data : dict  — données Reddit (mentions, sentiment)
-    news_data   : dict  — données news (ticker_matches, keyword_matches)
+    ticker       : str   — symbole boursier (ex: "NVDA")
+    market_data  : dict  — données de marché (prix, SMA200, volume…)
+    reddit_data  : dict  — données Reddit (mentions, sentiment)
+    news_data    : dict  — données news (ticker_matches, keyword_matches)
+    trend_data   : dict  — tendance Reddit 5j optionnelle {"trend": "RISING"|…}
+    in_watchlist : bool  — ticker appartient à la watchlist perso (défaut True)
 
     Retourne
     --------
-    dict avec total_score, sous-scores et components détaillés.
+    dict avec total_score (0-100), sous-scores et components détaillés.
+    Le sous-score cross_validation (–10 à +10) mesure la fiabilité du signal.
     """
     sma200, sma200_detail = _sma200_score(market_data)
     volume, volume_detail = _volume_score(market_data)
     reddit, reddit_detail = _reddit_score(reddit_data)
     news, news_detail = _news_score(news_data)
+    cross, cross_detail = _cross_validation_score(
+        reddit_data, news_data, trend_data, in_watchlist
+    )
 
-    total = sma200 + volume + reddit + news
+    total = max(0, min(100, sma200 + volume + reddit + news + cross))
 
     return {
         "ticker": ticker,
@@ -182,11 +237,13 @@ def score_ticker(
         "volume_score": volume,
         "reddit_score": reddit,
         "news_score": news,
+        "cross_validation_score": cross,
         "components": {
             "sma200_detail": sma200_detail,
             "volume_detail": volume_detail,
             "reddit_detail": reddit_detail,
             "news_detail": news_detail,
+            "cross_validation_detail": cross_detail,
         },
     }
 

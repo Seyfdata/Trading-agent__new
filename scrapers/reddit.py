@@ -27,6 +27,91 @@ except ImportError:
 from config.settings import WATCHLIST, EMOJI_FIRE, EMOJI_BULL, EMOJI_BEAR, EMOJI_NEUTRAL
 
 
+# ── Liste de référence — S&P 500 + Nasdaq 100 + watchlist perso ──────────────
+# Tout ticker ABSENT de cette liste sera marqué "non vérifié" dans le dashboard.
+# Source : top capitalisations S&P 500 + Nasdaq 100 + 22 tickers perso.
+VALID_TICKERS = {
+    # ── Notre watchlist (22) ─────────────────────────────────────────────────
+    "AAPL", "NVDA", "TSLA", "MSFT", "META", "AMZN", "GOOGL", "AMD",
+    "AVGO", "QCOM", "INTC", "MU", "ASML", "TSM", "MRVL", "PLTR",
+    "SMCI", "CRM", "SNOW", "TWLO", "ZS", "BABA",
+    # ── S&P 500 top 60 ───────────────────────────────────────────────────────
+    "JPM", "V", "JNJ", "UNH", "PG", "MA", "HD", "BAC", "XOM", "CVX",
+    "LLY", "PFE", "ABBV", "MRK", "KO", "PEP", "TMO", "COST", "DHR",
+    "ACN", "LIN", "TXN", "NEE", "VZ", "CSCO", "ABT", "UPS", "BMY",
+    "RTX", "HON", "SPGI", "LOW", "INTU", "SBUX", "CAT", "DE", "GS",
+    "MS", "WFC", "BLK", "C", "AXP", "USB", "PNC", "TGT", "WMT",
+    "BRK", "BRKB", "T", "CMCSA", "MDT", "CVS", "CI", "HUM", "ANTM",
+    "SYK", "ZTS", "ISRG", "BSX", "ELV", "MCK",
+    # ── Nasdaq 100 supplémentaires ───────────────────────────────────────────
+    "ADBE", "REGN", "GILD", "AMGN", "BIIB", "MRNA", "PANW", "FTNT",
+    "CRWD", "OKTA", "DDOG", "NET", "TEAM", "WDAY", "NOW", "VEEV",
+    "ZM", "DOCU", "ORCL", "IBM", "HPQ", "DELL", "STX", "WDC",
+    "SWKS", "KLAC", "AMAT", "LRCX", "MCHP", "ON", "TER", "ENTG",
+    "MPWR", "NFLX", "DIS", "PYPL", "SHOP", "UBER", "SNAP", "PINS",
+    "SPOT", "ROKU", "COIN", "TTD", "RBLX", "HOOD",
+    # ── Semi-conducteurs / Hardware ──────────────────────────────────────────
+    "QRVO", "WOLF", "CREE", "SLAB", "MTSI", "ACLS", "ONTO", "FORM",
+    "RMBS", "POWI", "DIOD", "IXYS",
+    # ── Énergie / Matières premières ─────────────────────────────────────────
+    "OXY", "SLB", "HAL", "BKR", "EOG", "COP", "PSX", "MPC", "VLO",
+    "DVN", "FANG", "EQT", "FCX", "NEM", "GOLD",
+    # ── Finance / Crypto-related ─────────────────────────────────────────────
+    "MSTR", "MARA", "RIOT", "HUT", "CLSK", "SQ", "SOFI",
+    # ── ETFs majeurs (signaux valides) ────────────────────────────────────────
+    "SPY", "QQQ", "IWM", "GLD", "SLV", "TLT", "HYG", "XLK", "XLF",
+    "ARKK", "SQQQ", "TQQQ", "SPXU", "UVXY",
+    # ── Autos / Véhicules électriques ─────────────────────────────────────────
+    "F", "GM", "RIVN", "LCID", "NIO", "XPEV", "LI",
+    # ── Transports / Voyage ──────────────────────────────────────────────────
+    "BA", "AAL", "DAL", "UAL", "LUV", "CCL", "RCL",
+    # ── Retail / Consommation ────────────────────────────────────────────────
+    "NKE", "LULU", "TJX", "ROST", "DECK", "GPS", "COLM",
+    # ── Biotech / Santé ───────────────────────────────────────────────────────
+    "BMRN", "ALNY", "VRTX", "SGEN", "INCY", "RARE", "FOLD",
+    # ── Meme stocks historiques ───────────────────────────────────────────────
+    "GME", "AMC", "BB", "NOK",
+}
+
+# ── Blacklist — faux tickers, acronymes, mots courants sur Reddit ─────────────
+# Complète le TICKER_STOP de RedditScanner/main.py (communs aux deux).
+# Ces mots ne sont JAMAIS des tickers valides, même s'ils sont en majuscules.
+TICKER_BLACKLIST = {
+    # Acronymes financiers
+    "AI", "CEO", "CFO", "COO", "CTO", "IPO", "ETF", "ATH", "DD",
+    "EPS", "EV", "PT", "PE", "PB", "FCF", "ROE", "ROI", "DCF",
+    # Jargon Reddit / WSB
+    "YOLO", "IMO", "FOMO", "TLDR", "FYI", "WSB", "HODL", "BTFD",
+    # Termes de trading
+    "BUY", "SELL", "HOLD", "LONG", "SHORT", "BULL", "BEAR",
+    "CALL", "PUT", "CALLS", "PUTS", "OTM", "ITM", "ATM",
+    "MOON", "PUMP", "DUMP", "ROCKET", "SQUEEZE", "GAMMA",
+    # Monnaies / Macro
+    "USD", "EUR", "GBP", "JPY", "CNY", "USA", "FED", "SEC",
+    "FDIC", "GDP", "CPI", "NFP", "ADP", "ISM", "OTC",
+    # Mots génériques souvent en majuscules sur Reddit
+    "THE", "AND", "FOR", "ALL", "NEW", "TOP", "NOW", "ARE",
+    "MOST", "WITH", "LIST", "HUGE", "MONEY", "BETA", "FLOW",
+    "BEST", "NEXT", "EACH", "SOME", "LIVE", "TIME", "BACK",
+    "HIGH", "VERY", "WHEN", "WILL", "FROM", "THIS", "THAT",
+    "HAVE", "MORE", "THAN", "INTO", "OVER", "JUST", "BEEN",
+    "ALSO", "WHAT", "ONLY", "WEEK", "YEAR", "LAST", "SAME",
+    "MOVE", "EVEN", "RISK", "PLAY", "PICK", "IDEA", "GOOD",
+    "REAL", "RATE", "OPEN", "GAIN", "LOSS", "ZERO", "STOP",
+    "DOWN", "HALF", "NEWS", "ALERT", "ALERTS", "TARGET", "UPDATE",
+    "MAIN", "EDIT", "FWIW", "AFAIK", "IIRC", "IMHO", "IIRC",
+}
+
+
+def is_known_ticker(ticker: str) -> bool:
+    """
+    Retourne True si le ticker appartient à la liste VALID_TICKERS.
+    Les tickers de la watchlist perso (WATCHLIST) sont aussi considérés connus.
+    Ne prend PAS en compte la blacklist (celle-ci est filtrée en amont).
+    """
+    return ticker in VALID_TICKERS or ticker in set(WATCHLIST)
+
+
 # Chemins possibles pour trouver ton scanner
 SCANNER_PATHS = [
     Path(__file__).parent.parent / "RedditScanner",
