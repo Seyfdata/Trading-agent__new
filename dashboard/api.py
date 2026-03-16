@@ -79,8 +79,15 @@ from database.models import (
     init_db, save_scores, save_market_context,
     get_score_history, get_score_trend,
     save_trade, get_all_trades, get_trade_by_id, close_trade, delete_trade,
-    DB_PATH,
+    get_open_trades, DB_PATH,
 )
+
+try:
+    import yfinance as _yf
+    _YF_AVAILABLE = True
+except ImportError:
+    _yf = None
+    _YF_AVAILABLE = False
 
 # ── App ─────────────────────────────────────────────────────────────────────
 
@@ -523,6 +530,128 @@ def get_history(days: int = 14):
         }
     except Exception as e:
         return {"error": str(e), "tickers": {}}
+
+
+# ── Suivi positions temps réel ───────────────────────────────────────────────
+
+@app.get("/api/positions/monitor")
+def monitor_positions():
+    """
+    Suivi temps réel des positions OPEN : prix actuel, PnL latent, alertes.
+
+    Pour chaque position ouverte :
+      - current_price         : prix actuel via yfinance.fast_info
+      - pnl_latent            : (current - entry) × shares
+      - pnl_pct               : % du capital engagé
+      - r_current             : R réalisé actuellement
+      - distance_target_pct   : % restant jusqu'au target
+      - distance_stop_pct     : % de marge avant le stop
+      - status_alert          : TARGET_HIT | STOP_HIT | NEAR_TARGET | NEAR_STOP | BREAKEVEN | null
+
+    Retourne {positions, alerts, checked_at, count}.
+    """
+    if not _YF_AVAILABLE:
+        return {"error": "yfinance non installé", "positions": [], "alerts": []}
+
+    try:
+        open_trades = get_open_trades()
+        if not open_trades:
+            return clean_for_json({
+                "positions": [], "alerts": [],
+                "checked_at": datetime.now().strftime("%H:%M:%S"), "count": 0,
+            })
+
+        positions = []
+        pos_alerts = []
+
+        for t in open_trades:
+            ticker = str(t.get("ticker", "")).strip()
+            try:
+                entry  = float(t.get("entry_price",  0))
+                stop   = float(t.get("stop_price",   0))
+                target = float(t.get("target_price", 0))
+                shares = int(t.get("shares", 0))
+
+                if not ticker or entry <= 0 or stop <= 0 or entry <= stop:
+                    continue
+
+                # ── Prix actuel ──────────────────────────────────────────────
+                fi = _yf.Ticker(ticker).fast_info
+                current = float(fi.last_price) if fi.last_price else None
+                if not current or current <= 0:
+                    continue
+
+                # ── Calculs ─────────────────────────────────────────────────
+                risk         = entry - stop
+                pnl_latent   = round((current - entry) * shares, 2)
+                pnl_pct      = round(pnl_latent / (entry * shares) * 100, 2) if entry * shares > 0 else 0.0
+                r_current    = round((current - entry) / risk, 2) if risk > 0 else 0.0
+                dist_target  = round((target - current) / current * 100, 2) if current > 0 and target > current else 0.0
+                dist_stop    = round((current - stop) / current * 100, 2)   if current > 0 else 0.0
+
+                # ── Alerte statut ────────────────────────────────────────────
+                status_alert = None
+                if current >= target:
+                    status_alert = "TARGET_HIT"
+                elif current <= stop:
+                    status_alert = "STOP_HIT"
+                elif 0 < dist_target < 1.5:
+                    status_alert = "NEAR_TARGET"
+                elif 0 < dist_stop < 1.5:
+                    status_alert = "NEAR_STOP"
+                elif -0.1 <= r_current <= 0.1:
+                    status_alert = "BREAKEVEN"
+
+                pos = {
+                    "id":                  t.get("id"),
+                    "ticker":              ticker,
+                    "entry_price":         entry,
+                    "stop_price":          stop,
+                    "target_price":        target,
+                    "shares":              shares,
+                    "current_price":       round(current, 2),
+                    "pnl_latent":          pnl_latent,
+                    "pnl_pct":             pnl_pct,
+                    "r_current":           r_current,
+                    "distance_target_pct": dist_target,
+                    "distance_stop_pct":   dist_stop,
+                    "status_alert":        status_alert,
+                }
+                positions.append(pos)
+
+                # ── Alerte push si statut critique ───────────────────────────
+                if status_alert and status_alert != "BREAKEVEN":
+                    severity  = "HIGH" if status_alert in ("TARGET_HIT", "STOP_HIT") else "MEDIUM"
+                    pnl_str   = ("+" if pnl_latent >= 0 else "") + f"${pnl_latent:.0f}"
+                    r_str     = ("+" if r_current  >= 0 else "") + f"{r_current:.1f}R"
+
+                    _msgs = {
+                        "TARGET_HIT":  f"Target atteint à ${current:.2f} ({r_str}, {pnl_str})",
+                        "STOP_HIT":    f"Stop touché à ${current:.2f} ({r_str}, {pnl_str})",
+                        "NEAR_TARGET": f"Proche du target ${target:.2f} — dist {dist_target:.1f}% ({r_str})",
+                        "NEAR_STOP":   f"Proche du stop ${stop:.2f} — dist {dist_stop:.1f}%",
+                    }
+                    pos_alerts.append({
+                        "ticker":       ticker,
+                        "severity":     severity,
+                        "status_alert": status_alert,
+                        "message":      _msgs.get(status_alert, ""),
+                        "timestamp":    datetime.now().strftime("%H:%M:%S"),
+                    })
+
+            except Exception as ex:
+                print(f"[positions/monitor] {ticker} : {ex}")
+                continue
+
+        return clean_for_json({
+            "positions":  positions,
+            "alerts":     pos_alerts,
+            "checked_at": datetime.now().strftime("%H:%M:%S"),
+            "count":      len(positions),
+        })
+
+    except Exception as e:
+        return {"error": str(e), "positions": [], "alerts": []}
 
 
 # ── Refresh (scan complet synchrone) ─────────────────────────────────────────

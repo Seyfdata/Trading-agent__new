@@ -2,9 +2,9 @@
 Setup Detector — Détection automatique de setups SMC sur la watchlist.
 
 3 types de setups détectés :
-  1. DISCOUNT_ZONE  — Prix dans la moitié basse du range 20j
-  2. SMA200_BOUNCE  — Rebond sur SMA200 en structure haussière (SMA50 > SMA200)
-  3. MOMENTUM       — Volume spike (×2) + hausse intraday > 1%
+  1. DISCOUNT_ZONE    — Prix dans la moitié basse du range 20j
+  2. SMA200_BOUNCE    — Rebond confirmé sur SMA200 en structure haussière (SMA50 > SMA200)
+  3. VOLUME_MOMENTUM  — Volume spike (×2) + hausse intraday > 1.5% + SMA50 OK
 
 Usage :
   python -m analysis.setup_detector
@@ -52,6 +52,11 @@ def _detect_discount_zone(hist, price: float) -> dict | None:
 
     discount_pct = (range_high - price) / (range_high - range_low) * 100
     Signal si discount_pct > 50 (prix sous le midpoint du range).
+
+    Filtres :
+      - Volume du jour >= 0.8× moyenne (pas de discount dans le vide)
+    Bonus confidence :
+      - Si la zone de discount coïncide avec la SMA200 (double support)
     """
     if len(hist) < 20:
         return None
@@ -69,6 +74,12 @@ def _detect_discount_zone(hist, price: float) -> dict | None:
     if discount_pct < 50:
         return None
 
+    # ── Filtre volume : activité minimum requise ──────────────────────────────
+    last_vol = float(hist["Volume"].iloc[-1])
+    avg_vol  = float(hist["Volume"].tail(20).mean())
+    if avg_vol <= 0 or last_vol < avg_vol * 0.8:
+        return None
+
     entry = price
     stop  = round(range_low * 0.995, 2)   # légèrement sous le range low
     risk  = entry - stop
@@ -78,27 +89,46 @@ def _detect_discount_zone(hist, price: float) -> dict | None:
     target = round(entry + RR_MINIMUM * risk, 2)
     rr     = round((target - entry) / risk, 2)
 
+    # ── Confidence de base ────────────────────────────────────────────────────
     confidence = "HIGH" if discount_pct >= 80 else "MEDIUM" if discount_pct >= 65 else "LOW"
 
     reasons = [
         f"Prix à {discount_pct:.0f}% de discount dans le range 20j",
         f"Range : ${range_low:.2f} – ${range_high:.2f} (taille ${range_size:.2f})",
     ]
-    # Confirmation volume
-    last_vol = float(hist["Volume"].iloc[-1])
-    avg_vol  = float(hist["Volume"].tail(10).mean())
-    if avg_vol > 0 and last_vol > avg_vol * 1.2:
-        reasons.append(f"Volume au-dessus de la moyenne (×{last_vol / avg_vol:.1f})")
+
+    vol_ratio = last_vol / avg_vol if avg_vol > 0 else 0
+    if vol_ratio >= 1.2:
+        reasons.append(f"Volume au-dessus de la moyenne (×{vol_ratio:.1f})")
+
+    # ── Bonus : double support si SMA200 proche ───────────────────────────────
+    double_support = False
+    if len(hist) >= 200:
+        sma200 = float(hist["Close"].rolling(200).mean().iloc[-1])
+        if sma200 > 0:
+            dist_sma200 = abs(price - sma200) / sma200 * 100
+            if dist_sma200 <= 5.0:
+                double_support = True
+                reasons.append(
+                    f"Double support : zone de discount + SMA200 (${sma200:.2f}, "
+                    f"dist {dist_sma200:.1f}%)"
+                )
+                # Upgrade confidence si double support
+                if confidence == "MEDIUM":
+                    confidence = "HIGH"
+                elif confidence == "LOW":
+                    confidence = "MEDIUM"
 
     return {
-        "setup_type":   "DISCOUNT_ZONE",
-        "entry":        round(entry, 2),
-        "stop":         stop,
-        "target":       target,
-        "rr_ratio":     rr,
-        "discount_pct": round(discount_pct, 1),
-        "confidence":   confidence,
-        "reasons":      reasons,
+        "setup_type":     "DISCOUNT_ZONE",
+        "entry":          round(entry, 2),
+        "stop":           stop,
+        "target":         target,
+        "rr_ratio":       rr,
+        "discount_pct":   round(discount_pct, 1),
+        "confidence":     confidence,
+        "double_support": double_support,
+        "reasons":        reasons,
     }
 
 
@@ -106,11 +136,20 @@ def _detect_discount_zone(hist, price: float) -> dict | None:
 
 def _detect_sma200_bounce(hist, price: float) -> dict | None:
     """
-    Rebond potentiel sur la SMA200 en structure haussière.
+    Rebond confirmé sur la SMA200 en structure haussière.
 
     Conditions :
-      - Prix entre -1% et +3% de la SMA200
-      - SMA50 > SMA200 (uptrend confirmé)
+      1. Prix entre 0% et +3% au-dessus de la SMA200 (zone de support)
+      2. SMA50 > SMA200 (tendance haussière confirmée)
+      3. Au moins un low des 5 derniers jours à moins de 1% de la SMA200
+         (rebond réel, pas juste passage à proximité)
+
+    Stop  : SMA200 × 0.985 (1.5% sous le support)
+    Target: entry + 2.5 × (entry – stop)
+
+    Confidence :
+      HIGH   — rebond sur la SMA200 dans les 2 derniers jours
+      MEDIUM — rebond dans les 5 derniers jours
     """
     if len(hist) < 200:
         return None
@@ -124,13 +163,28 @@ def _detect_sma200_bounce(hist, price: float) -> dict | None:
 
     dist_pct = (price - sma200) / sma200 * 100
 
-    if not (-1.0 <= dist_pct <= 3.0):
+    # Prix doit être entre 0% et +3% AU-DESSUS de la SMA200
+    if not (0.0 <= dist_pct <= 3.0):
         return None
 
-    uptrend = sma50 > sma200
+    # SMA50 doit être au-dessus de la SMA200 (tendance haussière)
+    if sma50 <= sma200:
+        return None
+
+    # ── Vérifier qu'un low récent a touché la SMA200 (< 1%) ──────────────────
+    lows_5d = hist["Low"].tail(5)
+    touch_day = None    # index depuis la fin (1 = hier, 2 = avant-hier, …)
+    for i, low in enumerate(reversed(lows_5d.values)):
+        dist_low = abs(low - sma200) / sma200 * 100
+        if dist_low < 1.0:
+            touch_day = i + 1
+            break
+
+    if touch_day is None:
+        return None   # pas de contact réel avec la SMA200 dans les 5 jours
 
     entry = price
-    stop  = round(sma200 * 0.99, 2)   # 1% sous la SMA200
+    stop  = round(sma200 * 0.985, 2)   # 1.5% sous la SMA200
     risk  = entry - stop
     if risk <= 0:
         return None
@@ -138,16 +192,14 @@ def _detect_sma200_bounce(hist, price: float) -> dict | None:
     target = round(entry + RR_MINIMUM * risk, 2)
     rr     = round((target - entry) / risk, 2)
 
-    confidence = "HIGH" if uptrend and dist_pct >= 0 else "MEDIUM"
+    confidence = "HIGH" if touch_day <= 2 else "MEDIUM"
 
+    recency_str = f"il y a {touch_day} jour" + ("" if touch_day == 1 else "s")
     reasons = [
-        f"Prix à {dist_pct:+.1f}% de la SMA200 (${sma200:.2f})",
-        "Test du support dynamique majeur (SMA200)",
+        f"Prix à {dist_pct:+.1f}% de la SMA200 (${sma200:.2f}) — zone de rebond",
+        f"Contact confirmé avec la SMA200 {recency_str} (low < 1% du support)",
+        f"Structure haussière : SMA50 (${sma50:.2f}) > SMA200 (${sma200:.2f})",
     ]
-    if uptrend:
-        reasons.append(f"Structure haussiere : SMA50 (${sma50:.2f}) > SMA200 (${sma200:.2f})")
-    else:
-        reasons.append(f"Attention : SMA50 (${sma50:.2f}) < SMA200 — structure mixte")
 
     return {
         "setup_type":   "SMA200_BOUNCE",
@@ -155,28 +207,39 @@ def _detect_sma200_bounce(hist, price: float) -> dict | None:
         "stop":         stop,
         "target":       target,
         "rr_ratio":     rr,
-        "discount_pct": round(max(0.0, 100.0 - abs(dist_pct) * 20), 1),
+        "discount_pct": round(100.0 - dist_pct * 20, 1),
         "confidence":   confidence,
+        "touch_day":    touch_day,
         "reasons":      reasons,
     }
 
 
-# ── Détecteur 3 : MOMENTUM ────────────────────────────────────────────────────
+# ── Détecteur 3 : VOLUME MOMENTUM ─────────────────────────────────────────────
 
-def _detect_momentum(hist, price: float) -> dict | None:
+def _detect_volume_momentum(hist, price: float) -> dict | None:
     """
-    Volume spike institutionnel + pression acheteuse.
+    Volume spike institutionnel + pression acheteuse + structure intacte.
 
     Conditions :
-      - Volume du jour > 2× la moyenne 20j
-      - Variation intraday > +1% vs close précédent
+      1. Volume du jour > 2× la moyenne 20j
+      2. Variation du jour > +1.5% vs close précédent
+      3. Prix au-dessus de la SMA50 (tendance à court terme intacte)
+      4. Prix non étendu : < 15% au-dessus de la SMA200
+
+    Stop  : low du jour – 0.5%
+    Target: entry + 2.5 × (entry – stop)
+
+    Confidence :
+      HIGH   — volume > 3× ET variation > 3%
+      MEDIUM — volume > 2× ET variation > 1.5%
     """
-    if len(hist) < 21:
+    if len(hist) < 50:
         return None
 
     avg_vol_20 = float(hist["Volume"].tail(20).mean())
     vol_today  = float(hist["Volume"].iloc[-1])
     prev_close = float(hist["Close"].iloc[-2])
+    day_low    = float(hist["Low"].iloc[-1])
 
     if avg_vol_20 <= 0 or prev_close <= 0:
         return None
@@ -184,36 +247,52 @@ def _detect_momentum(hist, price: float) -> dict | None:
     vol_ratio = vol_today / avg_vol_20
     chg_pct   = (price - prev_close) / prev_close * 100
 
-    if vol_ratio < 2.0 or chg_pct < 1.0:
+    # Conditions principales
+    if vol_ratio < 2.0 or chg_pct < 1.5:
         return None
 
-    # Stop sous le bas de la bougie du jour
-    day_low = float(hist["Low"].iloc[-1])
-    entry   = price
-    stop    = round(min(day_low * 0.998, price * 0.98), 2)
-    risk    = entry - stop
+    # Prix au-dessus de la SMA50
+    sma50 = float(hist["Close"].rolling(50).mean().iloc[-1])
+    if price <= sma50:
+        return None
+
+    # Prix non étendu vs SMA200 (< 15% au-dessus)
+    if len(hist) >= 200:
+        sma200 = float(hist["Close"].rolling(200).mean().iloc[-1])
+        if sma200 > 0:
+            dist_sma200 = (price - sma200) / sma200 * 100
+            if dist_sma200 >= 15.0:
+                return None   # trop étendu, risque de mean reversion
+    # Si on a moins de 200 barres, on ne bloque pas (données insuffisantes)
+
+    entry = price
+    stop  = round(day_low * 0.995, 2)   # 0.5% sous le low du jour
+    risk  = entry - stop
     if risk <= 0:
         return None
 
     target = round(entry + RR_MINIMUM * risk, 2)
     rr     = round((target - entry) / risk, 2)
 
-    confidence = "HIGH" if vol_ratio >= 3.0 and chg_pct >= 2.0 else "MEDIUM"
+    confidence = "HIGH" if vol_ratio >= 3.0 and chg_pct >= 3.0 else "MEDIUM"
 
     reasons = [
-        f"Volume ×{vol_ratio:.1f} la moyenne 20j — activite institutionnelle",
-        f"Momentum intraday : {chg_pct:+.1f}% vs close precedent",
-        f"Stop sous le bas du jour (${day_low:.2f})",
+        f"Volume ×{vol_ratio:.1f} la moyenne 20j — activité institutionnelle",
+        f"Momentum intraday : {chg_pct:+.1f}% vs close précédent",
+        f"Prix au-dessus SMA50 (${sma50:.2f}) — tendance court terme intacte",
+        f"Stop sous le bas du jour (${day_low:.2f} – 0.5%)",
     ]
 
     return {
-        "setup_type":   "MOMENTUM",
+        "setup_type":   "VOLUME_MOMENTUM",
         "entry":        round(entry, 2),
         "stop":         stop,
         "target":       target,
         "rr_ratio":     rr,
         "discount_pct": 0.0,
         "confidence":   confidence,
+        "vol_ratio":    round(vol_ratio, 2),
+        "chg_pct":      round(chg_pct, 2),
         "reasons":      reasons,
     }
 
@@ -222,7 +301,11 @@ def _detect_momentum(hist, price: float) -> dict | None:
 
 def detect_setups(tickers: list | None = None) -> list[dict]:
     """
-    Scanne les tickers et retourne les setups détectés, triés par confidence.
+    Scanne les tickers et retourne tous les setups valides, triés par confidence.
+
+    - Un ticker peut avoir plusieurs setups simultanément.
+    - Seuls les setups avec R:R >= RR_MINIMUM sont inclus.
+    - Tri : HIGH → MEDIUM → LOW, puis R:R décroissant.
 
     Paramètres
     ----------
@@ -235,11 +318,17 @@ def detect_setups(tickers: list | None = None) -> list[dict]:
      discount_pct, confidence, reasons, detected_at}
     """
     if not YF_AVAILABLE:
-        print("[WARN] yfinance non installee — pip install yfinance")
+        print("[WARN] yfinance non installée — pip install yfinance")
         return []
 
     if tickers is None:
         tickers = get_watchlist()
+
+    _detectors = [
+        _detect_discount_zone,
+        _detect_sma200_bounce,
+        _detect_volume_momentum,
+    ]
 
     setups = []
 
@@ -253,15 +342,26 @@ def detect_setups(tickers: list | None = None) -> list[dict]:
 
             price = float(hist["Close"].iloc[-1])
 
-            for detector in (_detect_discount_zone, _detect_sma200_bounce, _detect_momentum):
-                result = detector(hist, price)
-                if result is not None:
-                    setups.append({
-                        "ticker":      ticker,
-                        "price":       round(price, 2),
-                        "detected_at": datetime.now().strftime("%H:%M:%S"),
-                        **result,
-                    })
+            for detector in _detectors:
+                try:
+                    result = detector(hist, price)
+                except Exception as e:
+                    print(f"[WARN] {ticker}/{detector.__name__} : {e}")
+                    continue
+
+                if result is None:
+                    continue
+
+                # Filtre R:R minimum
+                if result.get("rr_ratio", 0) < RR_MINIMUM:
+                    continue
+
+                setups.append({
+                    "ticker":      ticker,
+                    "price":       round(price, 2),
+                    "detected_at": datetime.now().strftime("%H:%M:%S"),
+                    **result,
+                })
 
         except Exception as e:
             print(f"[WARN] {ticker} : {e}")
@@ -322,16 +422,14 @@ def calculate_position_size(
 def format_setup_alert(setup: dict, position: dict) -> str:
     """
     Formate un setup en texte lisible pour les logs ou le dashboard.
-
-    Retourne une chaîne multi-lignes.
     """
     _conf_icon = {"HIGH": "[FIRE]", "MEDIUM": "[BOLT]", "LOW": "[WARN]"}
     _type_icon = {
-        "DISCOUNT_ZONE": "[DISC]",
-        "SMA200_BOUNCE": "[SMA]",
-        "MOMENTUM":      "[MOM]",
+        "DISCOUNT_ZONE":   "[DISC]",
+        "SMA200_BOUNCE":   "[SMA]",
+        "VOLUME_MOMENTUM": "[MOM]",
     }
-    conf = setup.get("confidence", "?")
+    conf  = setup.get("confidence", "?")
     stype = setup.get("setup_type", "?")
 
     entry  = setup.get("entry",  0)
@@ -364,16 +462,16 @@ def format_setup_alert(setup: dict, position: dict) -> str:
 if __name__ == "__main__":
     print("=== Setup Detector — Test ===\n")
 
-    TEST_TICKERS = ["NVDA", "AAPL", "TSLA", "AMD"]
+    TEST_TICKERS = ["NVDA", "AAPL", "TSLA", "AMD", "MU", "PLTR"]
     capital = _get_capital()
     print(f"Capital : ${capital:,.0f}  |  Risque max : {RISK_PCT_MAX}%  |  R:R minimum : {RR_MINIMUM}x\n")
 
     setups = detect_setups(TEST_TICKERS)
 
     if not setups:
-        print("Aucun setup detecte sur les tickers de test.")
+        print("Aucun setup détecté sur les tickers de test.")
     else:
-        print(f"{len(setups)} setup(s) detecte(s) :\n")
+        print(f"{len(setups)} setup(s) détecté(s) :\n")
         for s in setups:
             pos = calculate_position_size(s["entry"], s["stop"], capital)
             print(format_setup_alert(s, pos))

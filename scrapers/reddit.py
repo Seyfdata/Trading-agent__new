@@ -100,6 +100,13 @@ TICKER_BLACKLIST = {
     "REAL", "RATE", "OPEN", "GAIN", "LOSS", "ZERO", "STOP",
     "DOWN", "HALF", "NEWS", "ALERT", "ALERTS", "TARGET", "UPDATE",
     "MAIN", "EDIT", "FWIW", "AFAIK", "IIRC", "IMHO", "IIRC",
+    # Mots anglais courants détectés comme faux tickers
+    "WELL", "LOW", "CLOSE", "LIKE", "MAKE", "MADE", "MUCH",
+    "THEM", "THEN", "YOUR", "SAFE", "CASH", "DEBT", "FUND",
+    "BOND", "BANK", "GOLD", "CORE", "TECH", "GROW", "DROP",
+    "PEAK", "DIPS", "FREE", "RUNS", "SAVE", "EASY", "FAST",
+    "RARE", "SURE", "STAY", "KEEP", "CARE", "HOPE", "FEAR",
+    "ONES", "TAKE", "TURN", "LIFE", "WORK",
 }
 
 

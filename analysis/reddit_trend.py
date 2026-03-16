@@ -143,6 +143,9 @@ def verify_ticker(ticker: str, timeout: int = 5) -> bool:
     """
     Vérifie si un ticker est un vrai titre boursier via yfinance.
 
+    - Retourne False immédiatement si le ticker fait < 2 caractères.
+    - Retourne False si le ticker (normalisé en majuscules) est dans
+      TICKER_BLACKLIST (mots courants, acronymes, jargon Reddit).
     - Cache le résultat en mémoire (_verify_cache) pour la durée du process.
     - Timeout de `timeout` secondes via threading (compatible Windows).
     - Retourne True si marketCap > 0 OU regularMarketPrice > 0.
@@ -150,6 +153,15 @@ def verify_ticker(ticker: str, timeout: int = 5) -> bool:
       latence réseau sur chaque appel.
     - Nécessite : pip install yfinance
     """
+    # Filtres rapides — pas de réseau
+    if len(ticker) < 2:
+        return False
+
+    from scrapers.reddit import TICKER_BLACKLIST  # import local pour éviter circulaire
+    if ticker.upper() in TICKER_BLACKLIST:
+        _verify_cache[ticker] = False
+        return False
+
     if ticker in _verify_cache:
         return _verify_cache[ticker]
 
