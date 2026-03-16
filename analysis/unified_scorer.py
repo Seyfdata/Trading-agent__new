@@ -54,27 +54,49 @@ def _grade(score: float) -> str:
 
 
 def _fresh_ob_nearby(obs: list[dict], current_price: float, threshold: float = 0.05) -> bool:
-    """Bull OB non mitigé dont le centre est à moins de `threshold` % du prix."""
+    """
+    Bull OB actif (non mitigé ou partiellement mitigé) à moins de `threshold*100`% du prix.
+    Utilise distance_pct si disponible (calculé par smc_analyzer v2), sinon fallback.
+    """
     if current_price <= 0:
         return False
     for ob in obs:
-        if ob.get("type") == "BULL" and not ob.get("mitigated"):
+        if ob.get("type") != "BULL":
+            continue
+        # OB actif = non mitigé OU partiellement mitigé
+        if ob.get("mitigated") and not ob.get("partially_mitigated"):
+            continue
+        dist_pct = ob.get("distance_pct")
+        if dist_pct is not None:
+            if dist_pct <= threshold * 100:
+                return True
+        else:
             mid  = (ob["high"] + ob["low"]) / 2
-            dist = abs(current_price - mid) / current_price
-            if dist <= threshold:
+            if abs(current_price - mid) / current_price <= threshold:
                 return True
     return False
 
 
-def _fvg_nearby(fvgs: list[dict], current_price: float, threshold: float = 0.05) -> bool:
-    """FVG haussier non comblé dont le centre est à moins de `threshold` % du prix."""
+def _fvg_nearby(fvgs: list[dict], current_price: float, threshold: float = 0.03) -> bool:
+    """
+    FVG haussier actif (non comblé ou partiellement comblé) à moins de `threshold*100`% du prix.
+    Seuil réduit à 3% (vs 5% pour OB) — FVG moins large, doit être plus précis.
+    """
     if current_price <= 0:
         return False
     for fvg in fvgs:
-        if fvg.get("type") == "BULL" and not fvg.get("filled"):
+        if fvg.get("type") != "BULL":
+            continue
+        # FVG actif = non comblé OU partiellement comblé
+        if fvg.get("filled") and not fvg.get("partially_filled"):
+            continue
+        dist_pct = fvg.get("distance_pct")
+        if dist_pct is not None:
+            if dist_pct <= threshold * 100:
+                return True
+        else:
             mid  = (fvg["high"] + fvg["low"]) / 2
-            dist = abs(current_price - mid) / current_price
-            if dist <= threshold:
+            if abs(current_price - mid) / current_price <= threshold:
                 return True
     return False
 
@@ -247,8 +269,8 @@ def unified_analysis(ticker: str) -> dict:
     # smc_analyzer (6 pts)
     s_htf_bull          = structure.get("bias") == "BULL"
     s_in_discount_ote   = dp.get("current_zone") in ("DISCOUNT", "OTE")
-    s_fresh_ob          = _fresh_ob_nearby(obs, cp, threshold=0.05)
-    s_fvg               = _fvg_nearby(fvgs, cp, threshold=0.05)
+    s_fresh_ob          = _fresh_ob_nearby(obs, cp, threshold=0.05)   # OB : 5 %
+    s_fvg               = _fvg_nearby(fvgs, cp, threshold=0.03)      # FVG : 3 %
     s_ssl_swept         = _ssl_swept_recently(ticker, ssl_levels, cp)
     s_confluences_strong = cf.get("count", 0) >= 4
 

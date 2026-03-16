@@ -151,16 +151,26 @@ def _detect_order_blocks(df: "pd.DataFrame", current_price: float) -> list[dict]
     """
     Détecte les Order Blocks récents (fenêtre : 3 derniers mois, ~63 bougies).
 
-    Bull OB  : dernière bougie baissière avant un mouvement haussier impulsif (>2 %).
-    Bear OB  : dernière bougie haussière avant un mouvement baissier impulsif (>2 %).
-    Mitigated : le prix est revenu dans la zone depuis sa création.
+    Critères de validation :
+      - Corps bougie OB > 0.3 % du prix (institution significative)
+      - Mouvement impulsif sur 1–3 bougies max (pas de rampe lente)
+      - Displacement >= 1.5× la taille du corps OB (vrai déséquilibre)
+
+    Zones :
+      Bull OB zone = [low, open]  — corps institutionnel baissier
+      Bear OB zone = [open, high] — corps institutionnel haussier
+
+    Mitigation (via prix actuel) :
+      non mitigé      : prix n'a pas encore touché la zone
+      partially_mitigated : prix a touché le haut de zone mais pas le milieu
+      mitigated       : prix a dépassé le milieu (zone absorbée)
     """
     recent = df.tail(63).copy().reset_index()
     opens  = recent["Open"].values
     closes = recent["Close"].values
     highs  = recent["High"].values
     lows   = recent["Low"].values
-    # Récupérer les dates depuis l'index ou la colonne "Date"
+
     if "Date" in recent.columns:
         dates = recent["Date"].tolist()
     elif "index" in recent.columns:
@@ -169,37 +179,100 @@ def _detect_order_blocks(df: "pd.DataFrame", current_price: float) -> list[dict]
         dates = recent.index.tolist()
 
     obs: list[dict] = []
+    MIN_BODY_PCT  = 0.003   # corps > 0.3 % du prix
+    MIN_MOVE_PCT  = 2.0     # mouvement impulsif > 2 %
+    MIN_DISPLACE  = 1.5     # displacement >= 1.5× corps OB
 
     for i in range(1, len(recent) - 3):
-        end_i    = min(i + 3, len(recent) - 1)
-        move_pct = (closes[end_i] - closes[i]) / closes[i] * 100
+        if opens[i] <= 0:
+            continue
 
-        bearish_candle = closes[i] < opens[i]
-        bullish_candle = closes[i] > opens[i]
+        candle_body  = abs(closes[i] - opens[i])
+        bearish      = closes[i] < opens[i]
+        bullish      = closes[i] > opens[i]
 
-        if bearish_candle and move_pct > 2.0:
-            # Bull OB : prix revenu dans la zone = mitigé
-            mitigated = current_price <= highs[i]
+        # Filtre corps significatif
+        if candle_body / opens[i] < MIN_BODY_PCT:
+            continue
+
+        # Recherche d'un mouvement impulsif sur 1-3 bougies
+        impulse_ok = False
+        for end_offset in range(1, 4):
+            end_i = i + end_offset
+            if end_i >= len(recent):
+                break
+            move_pct  = (closes[end_i] - closes[i]) / closes[i] * 100
+            impulse_sz = abs(closes[end_i] - closes[i])
+
+            if bearish and move_pct >= MIN_MOVE_PCT and impulse_sz >= MIN_DISPLACE * candle_body:
+                impulse_ok = True
+                break
+            if bullish and move_pct <= -MIN_MOVE_PCT and impulse_sz >= MIN_DISPLACE * candle_body:
+                impulse_ok = True
+                break
+
+        if not impulse_ok:
+            continue
+
+        if bearish:
+            # Bull OB : zone = [low, open]
+            ob_high = float(opens[i])   # haut de zone = open de la bougie baissière
+            ob_low  = float(lows[i])
+            ob_mid  = (ob_low + ob_high) / 2
+
+            if current_price <= ob_mid:
+                mitigated, partially = True,  False
+            elif current_price <= ob_high:
+                mitigated, partially = False, True
+            else:
+                mitigated, partially = False, False
+
+            dist = round(abs(current_price - ob_mid) / current_price * 100, 2) if current_price > 0 else None
             obs.append({
-                "type":      "BULL",
-                "high":      round(float(highs[i]), 2),
-                "low":       round(float(lows[i]), 2),
-                "date":      _fmt_date(dates[i]),
-                "mitigated": bool(mitigated),
+                "type":                "BULL",
+                "high":                round(ob_high, 2),
+                "low":                 round(ob_low,  2),
+                "date":                _fmt_date(dates[i]),
+                "mitigated":           bool(mitigated),
+                "partially_mitigated": bool(partially),
+                "distance_pct":        dist,
             })
 
-        elif bullish_candle and move_pct < -2.0:
-            mitigated = current_price >= lows[i]
+        elif bullish:
+            # Bear OB : zone = [open, high]
+            ob_low  = float(opens[i])   # bas de zone = open de la bougie haussière
+            ob_high = float(highs[i])
+            ob_mid  = (ob_low + ob_high) / 2
+
+            if current_price >= ob_mid:
+                mitigated, partially = True,  False
+            elif current_price >= ob_low:
+                mitigated, partially = False, True
+            else:
+                mitigated, partially = False, False
+
+            dist = round(abs(current_price - ob_mid) / current_price * 100, 2) if current_price > 0 else None
             obs.append({
-                "type":      "BEAR",
-                "high":      round(float(highs[i]), 2),
-                "low":       round(float(lows[i]), 2),
-                "date":      _fmt_date(dates[i]),
-                "mitigated": bool(mitigated),
+                "type":                "BEAR",
+                "high":                round(ob_high, 2),
+                "low":                 round(ob_low,  2),
+                "date":                _fmt_date(dates[i]),
+                "mitigated":           bool(mitigated),
+                "partially_mitigated": bool(partially),
+                "distance_pct":        dist,
             })
 
-    bull_obs = [o for o in obs if o["type"] == "BULL"][-3:]
-    bear_obs = [o for o in obs if o["type"] == "BEAR"][-3:]
+    def _ob_priority(o: dict) -> int:
+        """0 = frais, 1 = partiellement mitigé, 2 = mitigé."""
+        if not o["mitigated"] and not o["partially_mitigated"]:
+            return 0
+        if o["partially_mitigated"]:
+            return 1
+        return 2
+
+    # Garde les 3 plus récents de chaque type, triés par fraîcheur
+    bull_obs = sorted([o for o in obs if o["type"] == "BULL"][-4:], key=_ob_priority)[:3]
+    bear_obs = sorted([o for o in obs if o["type"] == "BEAR"][-4:], key=_ob_priority)[:3]
     return bull_obs + bear_obs
 
 
@@ -207,49 +280,98 @@ def _detect_order_blocks(df: "pd.DataFrame", current_price: float) -> list[dict]
 
 def _detect_fvg(df: "pd.DataFrame", current_price: float) -> list[dict]:
     """
-    Détecte les Fair Value Gaps non comblés (fenêtre : 3 derniers mois).
+    Détecte les Fair Value Gaps actifs (fenêtre : 3 derniers mois, ~63 bougies).
 
-    Bullish FVG  : low[i+2] > high[i]  (gap entre bougie 1 et 3)
-    Bearish FVG  : high[i+2] < low[i]
-    Filled       : le prix est passé à travers la zone.
+    Bull FVG : low[i+2] > high[i]  — gap laissé par un mouvement haussier
+    Bear FVG : high[i+2] < low[i]  — gap laissé par un mouvement baissier
+
+    Critères de qualité :
+      - Bougie centrale (imbalance) impulsive : corps > 60 % du range
+      - Taille du gap > 0.2 % du prix actuel (filtrer micro-gaps)
+
+    Statut de remplissage (via prix actuel) :
+      not filled          : prix n'a pas encore touché la zone
+      partially_filled    : prix entré dans la zone mais < 50 % absorbé
+      filled              : prix a dépassé le midpoint (zone consommée)
     """
     recent = df.tail(63)
+    opens  = recent["Open"].values
+    closes = recent["Close"].values
     highs  = recent["High"].values
     lows   = recent["Low"].values
     dates  = recent.index.tolist()
 
     fvgs: list[dict] = []
+    MIN_GAP_PCT = 0.002   # gap > 0.2 % du prix
 
     for i in range(len(recent) - 2):
-        # Bullish FVG
+        # Bougie centrale (i+1) doit être impulsive
+        mid_range = highs[i + 1] - lows[i + 1]
+        mid_body  = abs(closes[i + 1] - opens[i + 1])
+        if mid_range <= 0 or mid_body / mid_range < 0.60:
+            continue
+
+        # ── Bullish FVG : low[i+2] > high[i] ────────────────────────────────
         if lows[i + 2] > highs[i]:
             gap_low  = float(highs[i])
             gap_high = float(lows[i + 2])
-            filled   = current_price < gap_low
+            gap_size = gap_high - gap_low
+            gap_mid  = (gap_low + gap_high) / 2
+
+            if current_price > 0 and gap_size / current_price < MIN_GAP_PCT:
+                continue
+
+            # Prix descend dans le gap depuis le haut (gap_high)
+            if current_price <= gap_mid:
+                filled, partially = True,  False
+            elif current_price <= gap_high:
+                filled, partially = False, True
+            else:
+                filled, partially = False, False
+
+            dist = round(abs(current_price - gap_mid) / current_price * 100, 2) if current_price > 0 else None
             fvgs.append({
-                "type":   "BULL",
-                "high":   round(gap_high, 2),
-                "low":    round(gap_low, 2),
-                "date":   _fmt_date(dates[i + 1]),
-                "filled": filled,
+                "type":             "BULL",
+                "high":             round(gap_high, 2),
+                "low":              round(gap_low,  2),
+                "date":             _fmt_date(dates[i + 1]),
+                "filled":           bool(filled),
+                "partially_filled": bool(partially),
+                "distance_pct":     dist,
             })
 
-        # Bearish FVG
+        # ── Bearish FVG : high[i+2] < low[i] ────────────────────────────────
         elif highs[i + 2] < lows[i]:
             gap_high = float(lows[i])
             gap_low  = float(highs[i + 2])
-            filled   = current_price > gap_high
+            gap_size = gap_high - gap_low
+            gap_mid  = (gap_low + gap_high) / 2
+
+            if current_price > 0 and gap_size / current_price < MIN_GAP_PCT:
+                continue
+
+            # Prix monte dans le gap depuis le bas (gap_low)
+            if current_price >= gap_mid:
+                filled, partially = True,  False
+            elif current_price >= gap_low:
+                filled, partially = False, True
+            else:
+                filled, partially = False, False
+
+            dist = round(abs(current_price - gap_mid) / current_price * 100, 2) if current_price > 0 else None
             fvgs.append({
-                "type":   "BEAR",
-                "high":   round(gap_high, 2),
-                "low":    round(gap_low, 2),
-                "date":   _fmt_date(dates[i + 1]),
-                "filled": filled,
+                "type":             "BEAR",
+                "high":             round(gap_high, 2),
+                "low":              round(gap_low,  2),
+                "date":             _fmt_date(dates[i + 1]),
+                "filled":           bool(filled),
+                "partially_filled": bool(partially),
+                "distance_pct":     dist,
             })
 
-    # Retourner les 6 FVG non comblés les plus récents
-    unfilled = [f for f in fvgs if not f["filled"]]
-    return unfilled[-6:]
+    # Retourner les 6 FVG actifs (non comblés ou partiellement comblés) les plus récents
+    active = [f for f in fvgs if not f["filled"]]
+    return active[-6:]
 
 
 # ── 4. Liquidity Map ─────────────────────────────────────────────────────────
@@ -379,29 +501,39 @@ def _count_confluences(
         count += 1
         details.append("✅ Zone OTE (62–79 % Fibonacci)")
 
-    # 3. Bull OB non mitigé proche
-    bull_obs_active = [o for o in obs if o["type"] == "BULL" and not o["mitigated"]]
+    # 3. Bull OB actif (non mitigé ou partiellement mitigé) à moins de 5 %
+    bull_obs_active = [
+        o for o in obs
+        if o["type"] == "BULL" and (not o["mitigated"] or o.get("partially_mitigated", False))
+    ]
     near_ob = any(
-        abs(current_price - (o["high"] + o["low"]) / 2) / current_price <= 0.03
+        (o.get("distance_pct") or abs(current_price - (o["high"] + o["low"]) / 2) / current_price * 100) <= 5.0
         for o in bull_obs_active
     )
     if near_ob:
+        best = min(bull_obs_active, key=lambda o: o.get("distance_pct") or 999)
+        tag  = "partiel" if best.get("partially_mitigated") else "frais"
         count += 1
-        details.append("✅ Bull OB non mitigé à proximité")
+        details.append(f"✅ Bull OB {tag} à {best.get('distance_pct', '?')}% (${best['low']:.2f}–${best['high']:.2f})")
     else:
-        details.append("❌ Pas de Bull OB proche")
+        details.append("❌ Pas de Bull OB proche (<5%)")
 
-    # 4. FVG haussier non comblé proche
-    bull_fvgs_active = [f for f in fvgs if f["type"] == "BULL" and not f["filled"]]
+    # 4. FVG haussier actif (non comblé ou partiellement comblé) à moins de 3 %
+    bull_fvgs_active = [
+        f for f in fvgs
+        if f["type"] == "BULL" and (not f["filled"] or f.get("partially_filled", False))
+    ]
     near_fvg = any(
-        abs(current_price - (f["high"] + f["low"]) / 2) / current_price <= 0.03
+        (f.get("distance_pct") or abs(current_price - (f["high"] + f["low"]) / 2) / current_price * 100) <= 3.0
         for f in bull_fvgs_active
     )
     if near_fvg:
+        best_f = min(bull_fvgs_active, key=lambda f: f.get("distance_pct") or 999)
+        tag_f  = "partiel" if best_f.get("partially_filled") else "actif"
         count += 1
-        details.append("✅ FVG haussier non comblé proche")
+        details.append(f"✅ FVG Bull {tag_f} à {best_f.get('distance_pct', '?')}% (${best_f['low']:.2f}–${best_f['high']:.2f})")
     else:
-        details.append("❌ Pas de FVG proche")
+        details.append("❌ Pas de FVG proche (<3%)")
 
     # 5. Volume
     if len(df) > 20:
@@ -667,12 +799,25 @@ def format_smc_report(a: dict) -> str:
     # Zones d'intérêt
     lines.append("🟢 ZONES D'INTÉRÊT :")
     for ob in a.get("order_blocks", []):
-        st_tag = "⚠️ MITIGÉ" if ob["mitigated"] else "✅ ACTIF"
-        em     = "🟢" if ob["type"] == "BULL" else "🔴"
-        lines.append(f"  {em} {ob['type']} OB  ${ob['low']:.2f}–${ob['high']:.2f}  ({ob['date']})  {st_tag}")
+        if ob["mitigated"]:
+            st_tag = "⚠️ MITIGÉ"
+        elif ob.get("partially_mitigated"):
+            st_tag = "🔶 PARTIEL"
+        else:
+            st_tag = "✅ FRAIS"
+        em   = "🟢" if ob["type"] == "BULL" else "🔴"
+        dist = f"  [{ob['distance_pct']}% du prix]" if ob.get("distance_pct") is not None else ""
+        lines.append(f"  {em} {ob['type']} OB  ${ob['low']:.2f}–${ob['high']:.2f}  ({ob['date']})  {st_tag}{dist}")
     for fvg in a.get("fvg", []):
-        em = "📊" if fvg["type"] == "BULL" else "📉"
-        lines.append(f"  {em} FVG {fvg['type']}  ${fvg['low']:.2f}–${fvg['high']:.2f}  ({fvg['date']})  ✅ ACTIF")
+        if fvg["filled"]:
+            fvg_tag = "⚠️ COMBLÉ"
+        elif fvg.get("partially_filled"):
+            fvg_tag = "🔶 PARTIEL"
+        else:
+            fvg_tag = "✅ ACTIF"
+        em   = "📊" if fvg["type"] == "BULL" else "📉"
+        dist = f"  [{fvg['distance_pct']}% du prix]" if fvg.get("distance_pct") is not None else ""
+        lines.append(f"  {em} FVG {fvg['type']}  ${fvg['low']:.2f}–${fvg['high']:.2f}  ({fvg['date']})  {fvg_tag}{dist}")
     lines.append("")
 
     # Discount / Premium
@@ -717,20 +862,26 @@ def format_smc_report(a: dict) -> str:
 # ── Test __main__ ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import json
+    import json, sys
+    sys.stdout.reconfigure(encoding="utf-8")
 
-    print("=== SMC Analyzer — Test NVDA ===\n")
-    analysis = analyze_ticker("NVDA")
-
-    if analysis.get("error"):
-        print("ERREUR :", analysis["error"])
-    else:
-        print(format_smc_report(analysis))
-        print("\n--- Structure ---")
-        print(json.dumps(analysis["structure"], indent=2))
-        print("\n--- Discount/Premium ---")
-        print(json.dumps(analysis["discount_premium"], indent=2))
-        print("\n--- Setup ---")
-        print(json.dumps(analysis["setup"], indent=2))
+    for _ticker in ["NVDA", "AMD"]:
+        print(f"\n{'='*56}")
+        print(f"=== SMC Analyzer v2 — Test {_ticker} ===")
+        print('='*56)
+        _a = analyze_ticker(_ticker)
+        if _a.get("error"):
+            print("ERREUR :", _a["error"])
+            continue
+        print(format_smc_report(_a))
+        print("\n--- Order Blocks ---")
+        for ob in _a["order_blocks"]:
+            print(f"  {ob['type']} OB ${ob['low']}–${ob['high']} | mitigated={ob['mitigated']} | partial={ob.get('partially_mitigated')} | dist={ob.get('distance_pct')}%")
+        print("\n--- FVG ---")
+        for fvg in _a["fvg"]:
+            print(f"  {fvg['type']} FVG ${fvg['low']}–${fvg['high']} | filled={fvg['filled']} | partial={fvg.get('partially_filled')} | dist={fvg.get('distance_pct')}%")
         print("\n--- Confluences ---")
-        print(json.dumps(analysis["confluences"], indent=2))
+        cf = _a["confluences"]
+        print(f"  Score: {cf['count']}/6 — {cf['conviction']}")
+        for d in cf["details"]:
+            print(f"  {d}")
