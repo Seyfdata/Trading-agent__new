@@ -678,6 +678,8 @@ function OverviewTab(props) {
   var setupsData       = props.setupsData;
   var onGoToSetups     = props.onGoToSetups     || function() {};
   var posMonitor       = props.posMonitor        || { positions: [], count: 0 };
+  var scanResults      = props.scanResults       || [];
+  var onGoToSmc        = props.onGoToSmc         || function() {};
   var inst = (data.market && data.market.instruments) ? data.market.instruments : {};
   var macroInds = (data.market && data.market.macro_indicators) ? data.market.macro_indicators : [];
   var redditItems = (data.reddit && data.reddit.data) ? data.reddit.data.filter(function(r) { return r.in_watchlist; }).slice(0, 5) : [];
@@ -701,28 +703,29 @@ function OverviewTab(props) {
       <div className="stitle">TOP 3 DU JOUR</div>
       <Top3Section tickers={data.tickers ? data.tickers.tickers : []} />
 
-      {setupsData && (setupsData.setups || []).length > 0 && (
+      {scanResults.length > 0 && (
         <div className="card mb16" style={{ padding: '10px 16px' }}>
-          <div className="rowb">
+          <div className="rowb" style={{ marginBottom: 8 }}>
             <div className="row g8">
-              <span className="stitle" style={{ marginBottom: 0 }}>🎯 SETUPS DÉTECTÉS</span>
-              <span className="badge b-accent">{(setupsData.setups || []).length}</span>
+              <span className="stitle" style={{ marginBottom: 0 }}>🧠 TOP SETUPS (SCORE UNIFIÉ)</span>
+              <span className="badge b-accent">{scanResults.length}</span>
             </div>
-            <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={onGoToSetups}>
-              Voir détails →
+            <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={onGoToSmc}>
+              Voir analyse →
             </button>
           </div>
-          <div className="row g12 wrap" style={{ marginTop: 8 }}>
-            {(setupsData.setups || []).map(function(s, i) {
-              var color = _SETUP_COLOR[s.setup_type] || '#64748b';
-              return (
-                <span key={i} style={{ fontSize: 11 }}>
-                  <span style={{ color: color, fontWeight: 700 }}>{s.ticker}</span>
-                  <span className="mc"> {_SETUP_SHORT[s.setup_type] || '?'}</span>
-                </span>
-              );
-            })}
-          </div>
+          {scanResults.slice(0, 3).map(function(r, i) {
+            var gc = _gradeColor(r.grade);
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: i < 2 && i < scanResults.slice(0,3).length - 1 ? '1px solid rgba(30,41,59,.3)' : 'none' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, minWidth: 48 }}>{r.ticker}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: gc, background: gc + '15', padding: '1px 6px', borderRadius: 3, border: '1px solid ' + gc + '30', boxShadow: r.grade === 'A+' ? '0 0 6px ' + gc + '40' : 'none' }}>{r.grade}</span>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: gc }}>{r.unified_score}/10</span>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1519,10 +1522,16 @@ function AlertsTab(props) {
 // ── SMC Analysis Tab ──────────────────────────────────────────────────────
 
 function SmcTab(props) {
-  var smcData    = props.smcData    || {};
-  var smcLoading = props.smcLoading || false;
-  var onAnalyze  = props.onAnalyze  || function() {};
-  var onAddTrade = props.onAddTrade || function() {};
+  var smcData        = props.smcData        || {};
+  var smcLoading     = props.smcLoading     || false;
+  var unifiedData    = props.unifiedData    || {};
+  var unifiedLoading = props.unifiedLoading || false;
+  var scanResults    = props.scanResults    || [];
+  var scanLoading    = props.scanLoading    || false;
+  var onAnalyze      = props.onAnalyze      || function() {};
+  var onUnified      = props.onUnified      || function() {};
+  var onScan         = props.onScan         || function() {};
+  var onAddTrade     = props.onAddTrade     || function() {};
 
   var selState = useState('NVDA');
   var selectedTicker = selState[0];
@@ -1544,6 +1553,21 @@ function SmcTab(props) {
   var inp = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', color: 'var(--text)', fontFamily: 'JetBrains Mono,monospace', fontSize: 12 };
 
   function handleAnalyze() { onAnalyze(selectedTicker); }
+  function handleUnified() { onUnified(selectedTicker); }
+
+  function handleAddTradeUnified() {
+    var ud = unifiedData[selectedTicker];
+    if (!ud) return;
+    onAddTrade({
+      ticker:       selectedTicker,
+      entry_price:  ud.best_entry  ? String(ud.best_entry)  : '',
+      stop_price:   ud.best_stop   ? String(ud.best_stop)   : '',
+      target_price: ud.best_target ? String(ud.best_target) : '',
+      setup_type:   'MANUAL',
+      direction:    'LONG',
+      notes:        ud.reasoning || '',
+    });
+  }
 
   function copyReport() {
     var text = analysis && analysis.report ? analysis.report : '';
@@ -1609,13 +1633,70 @@ function SmcTab(props) {
           style={Object.assign({}, inp, { minWidth: 120 })}>
           {_J_TICKERS.map(function(tk) { return <option key={tk} value={tk}>{tk}</option>; })}
         </select>
-        <button className={'btn btn-p'} onClick={handleAnalyze} disabled={smcLoading}>
-          {smcLoading ? <span><span className="spin-anim">⟳</span> Analyse en cours...</span> : '🧠 Analyser'}
+        <button className={'btn btn-p'} onClick={handleAnalyze} disabled={smcLoading || unifiedLoading}>
+          {smcLoading ? <span><span className="spin-anim">⟳</span> En cours...</span> : '🧠 Analyse SMC'}
+        </button>
+        <button className="btn" style={{ borderColor: '#fbbf24', color: '#fbbf24' }} onClick={handleUnified} disabled={smcLoading || unifiedLoading}>
+          {unifiedLoading ? <span><span className="spin-anim">⟳</span> En cours...</span> : '🎯 Score Unifié'}
         </button>
         {analysis && analysis.analysis_date && (
           <span className="mc" style={{ fontSize: 10 }}>Analysé le {analysis.analysis_date}</span>
         )}
       </div>
+
+      {/* Carte Score Unifié */}
+      {(function() {
+        var ud = unifiedData[selectedTicker];
+        if (!ud) return null;
+        var gc = _gradeColor(ud.grade);
+        var isAPlus = ud.grade === 'A+';
+        var bdLabels = { discount_zone: 'Discount Zone', sma200_bounce: 'SMA200 Bounce', volume_momentum: 'Volume Momentum', htf_bull: 'HTF Bull', in_discount_or_ote: 'Discount/OTE', fresh_ob_nearby: 'Bull OB frais', fvg_nearby: 'FVG actif', ssl_swept: 'SSL balayé', confluences_strong: 'Confluences ≥4' };
+        var bdEntries = Object.keys(ud.scoring_breakdown || {}).map(function(k) { return { k: k, v: (ud.scoring_breakdown || {})[k] }; });
+        return (
+          <div className="mb16">
+            <div className="stitle">🎯 SCORE UNIFIÉ</div>
+            <div className="card" style={{ border: '1px solid ' + gc + '40', background: isAPlus ? 'rgba(251,191,36,.04)' : 'transparent' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>{selectedTicker}</span>
+                  <div style={{ padding: '6px 14px', borderRadius: 8, fontWeight: 700, fontSize: 20, color: gc, background: gc + '18', border: '1px solid ' + gc + '40', boxShadow: isAPlus ? '0 0 14px ' + gc + '50' : 'none' }}>{ud.grade}</div>
+                  <span style={{ fontWeight: 700, fontSize: 15, color: gc }}>{ud.unified_score}/10</span>
+                </div>
+                {ud.current_price != null && <span style={{ fontSize: 13, color: 'var(--muted)' }}>${Number(ud.current_price).toFixed(2)}</span>}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {bdEntries.map(function(item, i) {
+                  return <span key={i} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 3, color: item.v ? '#10b981' : '#475569', background: item.v ? 'rgba(16,185,129,.07)' : 'transparent' }}>{item.v ? '✅' : '❌'} {bdLabels[item.k] || item.k}</span>;
+                })}
+              </div>
+              {ud.best_entry != null && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 0, marginBottom: 12, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+                  {[
+                    { label: 'ENTRY',  val: ud.best_entry,  color: 'var(--text)',   fmt: function(v) { return '$' + Number(v).toFixed(2); } },
+                    { label: 'STOP',   val: ud.best_stop,   color: 'var(--bear)',   fmt: function(v) { return '$' + Number(v).toFixed(2); } },
+                    { label: 'TARGET', val: ud.best_target, color: 'var(--bull)',   fmt: function(v) { return '$' + Number(v).toFixed(2); } },
+                    { label: 'R:R',    val: ud.rr_ratio,    color: 'var(--accent)', fmt: function(v) { return Number(v).toFixed(2) + 'R'; } },
+                  ].map(function(p, pi) {
+                    return (
+                      <div key={p.label} style={{ textAlign: 'center', padding: '10px 4px', borderLeft: pi > 0 ? '1px solid var(--border)' : 'none' }}>
+                        <div style={{ fontSize: 9, color: p.color, marginBottom: 3 }}>{p.label}</div>
+                        <div style={{ fontWeight: 700, color: p.color, fontSize: 14 }}>{p.val != null ? p.fmt(p.val) : '—'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {ud.reasoning && (
+                <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginBottom: 12, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>{ud.reasoning}</div>
+              )}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-p" onClick={handleAddTradeUnified}>📝 Enregistrer ce trade</button>
+                <a href={'https://www.tradingview.com/chart/?symbol=' + selectedTicker} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}><button className="btn">📈 TradingView</button></a>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Erreur */}
       {analysis && analysis.error && (
@@ -1871,13 +1952,49 @@ function SmcTab(props) {
       )}
 
       {/* Loading spinner */}
-      {smcLoading && !analysis && (
+      {(smcLoading || unifiedLoading) && !analysis && !unifiedData[selectedTicker] && (
         <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
           <div style={{ fontSize: 24, marginBottom: 12 }}><span className="spin-anim">⟳</span></div>
-          <div>Analyse SMC en cours pour {selectedTicker}...</div>
+          <div>Analyse en cours pour {selectedTicker}...</div>
           <div style={{ fontSize: 11, marginTop: 6 }}>Récupération des données yfinance + détection des structures</div>
         </div>
       )}
+
+      {/* ── Scanner Unifié ─────────────────────────────────────────────── */}
+      <div style={{ marginTop: 24, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <div className="stitle" style={{ marginBottom: 0 }}>🎯 SCANNER UNIFIÉ</div>
+          <button className="btn" style={{ borderColor: '#fbbf24', color: '#fbbf24', fontSize: 10, padding: '3px 12px' }} onClick={onScan} disabled={scanLoading}>
+            {scanLoading ? <span><span className="spin-anim">⟳</span> Scan...</span> : '🎯 Scanner Top 5'}
+          </button>
+        </div>
+        {scanLoading && (
+          <div className="card mc" style={{ padding: 20 }}><span className="spin-anim">⟳</span> Analyse en cours...</div>
+        )}
+        {!scanLoading && scanResults.length > 0 && scanResults.map(function(r, i) {
+          var gc = _gradeColor(r.grade);
+          var isAP = r.grade === 'A+';
+          return (
+            <div key={i} className="card" style={{ border: '1px solid ' + gc + '30', padding: '10px 14px', marginBottom: 8, background: isAP ? 'rgba(251,191,36,.03)' : 'transparent' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: r.reasoning ? 6 : 0 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{r.ticker}</span>
+                  <span style={{ fontWeight: 700, fontSize: 12, color: gc, background: gc + '18', padding: '2px 8px', borderRadius: 4, border: '1px solid ' + gc + '30', boxShadow: isAP ? '0 0 8px ' + gc + '40' : 'none' }}>{r.grade}</span>
+                  <span style={{ color: gc, fontWeight: 700, fontSize: 12 }}>{r.unified_score}/10</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {r.current_price != null && <span style={{ fontSize: 11, color: 'var(--muted)' }}>${Number(r.current_price).toFixed(2)}</span>}
+                  <button className="btn" style={{ fontSize: 10, padding: '2px 8px' }} onClick={function() { setSelectedTicker(r.ticker); onUnified(r.ticker); }}>Analyser →</button>
+                </div>
+              </div>
+              {r.reasoning && <div style={{ fontSize: 10, color: 'var(--muted)', fontStyle: 'italic', marginTop: 4 }}>{r.reasoning}</div>}
+            </div>
+          );
+        })}
+        {!scanLoading && scanResults.length === 0 && (
+          <div className="mc" style={{ fontSize: 11, padding: '8px 0' }}>Cliquez sur "🎯 Scanner Top 5" pour analyser les meilleurs tickers</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1888,6 +2005,14 @@ var _SETUP_COLOR = { DISCOUNT_ZONE: '#3b82f6', SMA200_BOUNCE: '#10b981', MOMENTU
 var _SETUP_LABEL = { DISCOUNT_ZONE: 'Discount Zone', SMA200_BOUNCE: 'SMA200 Bounce', MOMENTUM: 'Momentum' };
 var _SETUP_SHORT = { DISCOUNT_ZONE: 'DISC', SMA200_BOUNCE: 'SMA', MOMENTUM: 'MOM' };
 var _CONF_BADGE  = { HIGH: 'b-bull', MEDIUM: 'b-neutral', LOW: 'b-muted' };
+
+function _gradeColor(grade) {
+  if (grade === 'A+') return '#fbbf24';
+  if (grade === 'A')  return '#10b981';
+  if (grade === 'B')  return '#3b82f6';
+  if (grade === 'C')  return '#f59e0b';
+  return '#64748b';
+}
 
 function SetupsTab(props) {
   var setupsData    = props.setupsData;
@@ -2632,6 +2757,22 @@ function TradingDashboard() {
   var smcLoading      = smcLoadingState[0];
   var setSmcLoading   = smcLoadingState[1];
 
+  var unifiedDataState    = useState({});
+  var unifiedData         = unifiedDataState[0];
+  var setUnifiedData      = unifiedDataState[1];
+
+  var unifiedLoadingState = useState(false);
+  var unifiedLoading      = unifiedLoadingState[0];
+  var setUnifiedLoading   = unifiedLoadingState[1];
+
+  var scanResultsState    = useState([]);
+  var scanResults         = scanResultsState[0];
+  var setScanResults      = scanResultsState[1];
+
+  var scanLoadingState    = useState(false);
+  var scanLoading         = scanLoadingState[0];
+  var setScanLoading      = scanLoadingState[1];
+
   var prefillTradeState = useState(null);
   var prefillTrade      = prefillTradeState[0];
   var setPrefillTrade   = prefillTradeState[1];
@@ -2828,6 +2969,30 @@ function TradingDashboard() {
       .catch(function() { setSmcLoading(false); });
   }
 
+  function loadUnifiedAnalysis(ticker) {
+    if (unifiedLoading) return;
+    setUnifiedLoading(true);
+    fetch('/api/unified/' + encodeURIComponent(ticker))
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        setUnifiedData(function(prev) { var n = Object.assign({}, prev); n[ticker] = json; return n; });
+        setUnifiedLoading(false);
+      })
+      .catch(function() { setUnifiedLoading(false); });
+  }
+
+  function loadScanUnified() {
+    if (scanLoading) return;
+    setScanLoading(true);
+    fetch('/api/unified?top_n=5')
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        setScanResults(json.analyses || []);
+        setScanLoading(false);
+      })
+      .catch(function() { setScanLoading(false); });
+  }
+
   function handleAddTradeFromSmc(tradeData) {
     setPrefillTrade(tradeData);
     setTab('journal');
@@ -2903,13 +3068,13 @@ function TradingDashboard() {
       </nav>
 
       <main className="content">
-        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} />}
+        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} />}
         {tab === 'watchlist' && <WatchlistTab data={data} />}
         {tab === 'reddit'    && <RedditTab    data={data} />}
         {tab === 'news'      && <NewsTab      data={data} />}
         {tab === 'alerts'    && <AlertsTab alertData={alertData} liveNews={liveNews} countdown={(alertData.in_killzone || testMode) ? countdown : null} testMode={testMode} onSimulate={activateTestMode} posMonitor={posMonitor} />}
         {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} />}
-        {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} onAnalyze={loadSmcAnalysis} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
+        {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} unifiedData={unifiedData} unifiedLoading={unifiedLoading} scanResults={scanResults} scanLoading={scanLoading} onAnalyze={loadSmcAnalysis} onUnified={loadUnifiedAnalysis} onScan={loadScanUnified} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
         {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} prefillTrade={prefillTrade} onClearPrefill={function() { setPrefillTrade(null); }} /></ErrorBoundary>}
         {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}
       </main>

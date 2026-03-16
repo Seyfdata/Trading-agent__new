@@ -17,6 +17,8 @@ Endpoints :
     GET  /api/setups               — setups détectés (DISCOUNT_ZONE, SMA200_BOUNCE, MOMENTUM)
     GET  /api/analysis/{ticker}   — analyse SMC complète pour un ticker
     GET  /api/analysis            — analyse SMC des top 5 tickers de la watchlist
+    GET  /api/unified/{ticker}    — score de conviction unifié (setup_detector + SMC)
+    GET  /api/unified             — scan unifié des top N tickers
     POST /api/refresh              — lance un scan complet en arrière-plan
     POST /api/trades               — créer un nouveau trade
     GET  /api/trades               — liste tous les trades (params: status, limit)
@@ -973,6 +975,34 @@ def get_smc_analysis_watchlist():
             "count":       len(results),
             "analyses":    results,
             "analyzed_at": datetime.now().isoformat(),
+        })
+    except Exception as e:
+        return {"error": str(e), "analyses": [], "count": 0}
+
+
+# ── Unified Scorer ────────────────────────────────────────────────────────────
+
+@app.get("/api/unified/{ticker}")
+def get_unified(ticker: str):
+    """Score de conviction unifié (setup_detector × SMC) pour un ticker."""
+    try:
+        from analysis.unified_scorer import unified_analysis
+        result = unified_analysis(ticker.upper().strip())
+        return clean_for_json(result)
+    except Exception as e:
+        return {"error": str(e), "ticker": ticker, "unified_score": 0, "grade": "NO TRADE"}
+
+
+@app.get("/api/unified")
+def get_unified_scan(top_n: int = 5):
+    """Scan unifié sur les top N tickers (trié par unified_score)."""
+    try:
+        from analysis.unified_scorer import scan_unified
+        results = scan_unified(top_n=top_n)
+        return clean_for_json({
+            "count":       len(results),
+            "analyses":    results,
+            "scanned_at":  datetime.now().isoformat(),
         })
     except Exception as e:
         return {"error": str(e), "analyses": [], "count": 0}
