@@ -2671,6 +2671,432 @@ function JournalTab(props) {
   );
 }
 
+// ── Guide Tab ──────────────────────────────────────────────────────────────
+
+function GuideTab() {
+  function scrollTo(id) {
+    var el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  var sCard    = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: '20px 24px', marginBottom: 24 };
+  var sCode    = { background: 'var(--bg)', border: '1px solid var(--border)', borderLeft: '3px solid var(--muted)', borderRadius: 6, padding: '12px 16px', fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text)', marginBottom: 8, lineHeight: 1.8, whiteSpace: 'pre-wrap', overflowX: 'auto' };
+  var sEx      = { background: 'rgba(59,130,246,.05)', border: '1px solid rgba(59,130,246,.2)', borderLeft: '3px solid #3b82f6', borderRadius: 6, padding: '12px 16px', marginBottom: 12 };
+  var sText    = { color: '#94a3b8', fontSize: 13, lineHeight: 1.7, marginBottom: 8 };
+  var sStep    = { display: 'flex', gap: 10, marginBottom: 8, alignItems: 'flex-start' };
+  var sNum     = { minWidth: 22, height: 22, borderRadius: '50%', background: 'rgba(59,130,246,.2)', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, flexShrink: 0, marginTop: 1 };
+  var s0       = { marginBottom: 0 };
+
+  function BackTop() {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+        <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={function() { scrollTo('guide-top'); }}>⬆️ Retour en haut</button>
+      </div>
+    );
+  }
+
+  function STitle(props) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+        <span style={{ fontSize: 22 }}>{props.icon}</span>
+        <h2 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', margin: 0, letterSpacing: .5 }}>{props.title}</h2>
+      </div>
+    );
+  }
+
+  function Step(props) {
+    return (
+      <div style={sStep}>
+        <div style={sNum}>{props.n}</div>
+        <div style={Object.assign({}, sText, s0)}>{props.children}</div>
+      </div>
+    );
+  }
+
+  var TOC_ITEMS = [
+    { id: 'g1', label: '🚀 Installation et lancement' },
+    { id: 'g2', label: '☀️ Routine morning (pré-marché)' },
+    { id: 'g3', label: '🔴 Pendant la killzone' },
+    { id: 'g4', label: '📝 Enregistrer et suivre un trade' },
+    { id: 'g5', label: '🧠 Analyser un ticker' },
+    { id: 'g6', label: '📊 Lire les métriques de performance' },
+    { id: 'g7', label: '⚙️ Configuration' },
+    { id: 'g8', label: '🎯 Comprendre les scores et alertes' },
+  ];
+
+  return (
+    <div id="guide-top">
+
+      {/* ── En-tête ── */}
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>📘 Guide d'utilisation</h1>
+        <p style={sText}>Tout ce que tu dois savoir pour utiliser le dashboard SMC-AI Trading Agent.</p>
+      </div>
+
+      {/* ── Sommaire ── */}
+      <div className="card" style={{ marginBottom: 24, padding: '16px 20px' }}>
+        <div className="stitle">SOMMAIRE</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 6 }}>
+          {TOC_ITEMS.map(function(item, i) {
+            return (
+              <button key={item.id} onClick={function() { scrollTo(item.id); }}
+                style={{ background: 'rgba(59,130,246,.06)', border: '1px solid rgba(59,130,246,.15)', borderRadius: 6, padding: '8px 12px', color: 'var(--accent)', fontFamily: 'JetBrains Mono, monospace', fontSize: 12, cursor: 'pointer', textAlign: 'left' }}>
+                <span style={{ color: 'var(--muted)', marginRight: 6 }}>{i + 1}.</span>{item.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Section 1 : Installation ── */}
+      <div id="g1" style={sCard}>
+        <STitle icon="🚀" title="Installation et lancement" />
+        <p style={sText}>Prérequis : <strong style={{ color: 'var(--text)' }}>Python 3.10+</strong> et Git installés sur ta machine.</p>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 6 }}>INSTALLATION</div>
+        <pre style={sCode}>{`git clone https://github.com/ton-repo/trading-agent.git
+cd trading-agent
+python -m venv .venv
+.venv\\Scripts\\activate          # Windows
+source .venv/bin/activate        # macOS / Linux
+pip install -r requirements.txt
+copy .env.example .env           # puis éditer avec tes clés API`}</pre>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 6, marginTop: 12 }}>LANCER LE DASHBOARD</div>
+        <pre style={sCode}>{`python launch_dashboard.py
+# → Ouvre http://localhost:8000/dashboard dans ton navigateur`}</pre>
+        <div style={Object.assign({}, sEx, { marginTop: 12 })}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#3b82f6', marginBottom: 8, letterSpacing: 1 }}>💡 ASTUCES</div>
+          <div style={sText}>• <strong style={{ color: 'var(--text)' }}>Arrêter</strong> : Ctrl+C dans le terminal</div>
+          <div style={sText}>• <strong style={{ color: 'var(--text)' }}>Raccourci bureau</strong> : créer un fichier <code style={{ color: '#fbbf24', background: 'rgba(251,191,36,.08)', padding: '1px 4px', borderRadius: 3 }}>launch_dashboard.bat</code> contenant la commande</div>
+          <div style={Object.assign({}, sText, s0)}>• <strong style={{ color: 'var(--text)' }}>Mise à jour</strong> : <code style={{ color: '#fbbf24', background: 'rgba(251,191,36,.08)', padding: '1px 4px', borderRadius: 3 }}>git pull {'&&'} pip install -r requirements.txt</code></div>
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 2 : Routine morning ── */}
+      <div id="g2" style={sCard}>
+        <STitle icon="☀️" title="Routine morning (pré-marché)" />
+        <p style={sText}>Workflow recommandé chaque matin <strong style={{ color: 'var(--text)' }}>avant 14h30</strong> pour préparer ta session de trading.</p>
+        {[
+          { n: 1,  t: 'Lancer le dashboard → cliquer 🔄 Rafraîchir pour mettre à jour toutes les données' },
+          { n: 2,  t: 'Onglet Vue d\'ensemble : vérifier le contexte marché (BULL/NEUTRAL/BEAR) et le verdict (GO/PRUDENCE/NO TRADE)' },
+          { n: 3,  t: 'Regarder le Top 3 du jour — ce sont tes candidats prioritaires pour la session' },
+          { n: 4,  t: 'Calendrier macro : y a-t-il un événement risqué ? (NFP, CPI, FOMC = prudence ou NO TRADE)' },
+          { n: 5,  t: 'Onglet Reddit : vérifier les tickers en tendance RISING et confirmés (✅)' },
+          { n: 6,  t: 'Onglet News : lire les news filtrées pour tes tickers watchlistés' },
+          { n: 7,  t: 'Onglet Setups : cliquer "Scanner les setups" pour voir les opportunités détectées' },
+          { n: 8,  t: 'Onglet Analyse SMC : lancer "🎯 Scanner Top 5" pour obtenir les scores unifiés' },
+          { n: 9,  t: 'Pour chaque Grade A/A+ : cliquer 📈 TradingView pour valider visuellement le setup' },
+          { n: 10, t: 'Définir ton plan : entry, stop, target, taille de position → prêt pour 14h30' },
+        ].map(function(s) { return <Step key={s.n} n={s.n}>{s.t}</Step>; })}
+        <div style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.2)', borderLeft: '3px solid #10b981', borderRadius: 6, padding: '14px 18px', marginTop: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#10b981', marginBottom: 10, letterSpacing: 1 }}>⏱ MATIN TYPE — 10 MINUTES</div>
+          {[
+            { time: '13h00', action: 'Lancer dashboard + Rafraîchir les données' },
+            { time: '13h05', action: 'Vérifier contexte marché + Top 3' },
+            { time: '13h08', action: 'Scanner setups + Lancer Score Unifié Top 5' },
+            { time: '13h10', action: 'Ouvrir TradingView sur les tickers Grade A/A+' },
+          ].map(function(r, i) {
+            return (
+              <div key={i} style={{ display: 'flex', gap: 16, padding: '5px 0', borderBottom: i < 3 ? '1px solid rgba(16,185,129,.1)' : 'none' }}>
+                <span style={{ color: '#10b981', fontWeight: 700, minWidth: 52, fontSize: 12 }}>{r.time}</span>
+                <span style={{ color: '#94a3b8', fontSize: 12 }}>{r.action}</span>
+              </div>
+            );
+          })}
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 3 : Killzone ── */}
+      <div id="g3" style={sCard}>
+        <STitle icon="🔴" title="Pendant la killzone (14h30–16h30)" />
+        <p style={sText}>La killzone correspond à l'ouverture de Wall Street. Le dashboard passe automatiquement en mode actif.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', borderRadius: 8, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 8, letterSpacing: 1 }}>🔴 MODE LIVE ACTIF</div>
+            <div style={Object.assign({}, sText, { marginBottom: 4 })}>• Header : <strong style={{ color: '#ef4444' }}>🔴 LIVE 14h30-16h30</strong></div>
+            <div style={Object.assign({}, sText, { marginBottom: 4 })}>• Alertes auto toutes les <strong style={{ color: 'var(--text)' }}>5 minutes</strong></div>
+            <div style={Object.assign({}, sText, { marginBottom: 4 })}>• Positions suivies en temps réel</div>
+            <div style={Object.assign({}, sText, s0)}>• Countdown visible dans l'onglet ⚡ Alertes</div>
+          </div>
+          <div style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', borderRadius: 8, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, marginBottom: 8, letterSpacing: 1 }}>🧪 HORS KILLZONE</div>
+            <div style={Object.assign({}, sText, { marginBottom: 4 })}>• Cliquer <strong style={{ color: 'var(--text)' }}>"🧪 Simuler killzone"</strong> dans l'onglet Alertes</div>
+            <div style={Object.assign({}, sText, { marginBottom: 4 })}>• Mode test actif pendant 30 min</div>
+            <div style={Object.assign({}, sText, s0)}>• Utile pour tester les alertes et le suivi de positions</div>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>TYPES D'ALERTES</div>
+        {[
+          { icon: '🔥', type: 'Volume Breakout',  color: '#f59e0b', desc: 'Un ticker dépasse 2× son volume moyen → institutions actives, surveiller de près' },
+          { icon: '📍', type: 'Approche SMA200',  color: '#3b82f6', desc: 'Un ticker s\'approche de son support dynamique → potentiel rebond en vue' },
+          { icon: '🚀', type: 'Mouvement Fort',   color: '#10b981', desc: 'Variation intraday > 3% → le ticker bouge, vérifier la direction' },
+          { icon: '📰', type: 'Breaking News',    color: '#8b5cf6', desc: 'Nouvelle info sur un ticker dans les 30 dernières minutes → évaluer l\'impact' },
+          { icon: '🎯', type: 'Target Atteint',   color: '#10b981', desc: 'Ton prix cible a été touché → clôture recommandée' },
+          { icon: '🛑', type: 'Stop Touché',      color: '#ef4444', desc: 'Ton stop loss a été touché → clôture immédiate recommandée' },
+        ].map(function(a, i) {
+          return (
+            <div key={i} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: i < 5 ? '1px solid rgba(30,41,59,.4)' : 'none', alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 15, minWidth: 22 }}>{a.icon}</span>
+              <div>
+                <span style={{ fontWeight: 700, color: a.color, fontSize: 12 }}>{a.type}</span>
+                <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>— {a.desc}</span>
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ background: 'rgba(239,68,68,.06)', border: '1px solid rgba(239,68,68,.2)', borderRadius: 6, padding: '10px 14px', marginTop: 14 }}>
+          <span style={{ color: '#ef4444', fontWeight: 700, fontSize: 12 }}>⛔ RÈGLE D'OR :</span>
+          <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>Si le verdict macro est NO TRADE, ne prends aucun trade pendant la killzone, quelle que soit l'alerte.</span>
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 4 : Journal ── */}
+      <div id="g4" style={sCard}>
+        <STitle icon="📝" title="Enregistrer et suivre un trade" />
+        {[
+          { n: 1, t: 'Identifier un setup dans l\'onglet Setups ou Analyse SMC (Grade A/A+)' },
+          { n: 2, t: 'Valider le setup sur TradingView — cliquer le bouton 📈 depuis l\'onglet Analyse SMC' },
+          { n: 3, t: 'Placer l\'ordre sur ton broker (IBKR ou autre)' },
+          { n: 4, t: 'Onglet 📝 Journal → remplir Entry, Stop, Target → R:R et sizing calculés automatiquement → ✅ Enregistrer' },
+          { n: 5, t: 'La position apparaît dans "Positions ouvertes" avec PnL latent mis à jour en temps réel' },
+          { n: 6, t: 'À la clôture : cliquer 🔒 Clôturer → entrer le prix de sortie → PnL, R réalisé et statut (WIN/LOSS/BE) calculés automatiquement' },
+        ].map(function(s) { return <Step key={s.n} n={s.n}>{s.t}</Step>; })}
+        <div style={{ background: 'rgba(59,130,246,.05)', border: '1px solid rgba(59,130,246,.2)', borderLeft: '3px solid #3b82f6', borderRadius: 6, padding: '14px 18px', marginTop: 16, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#3b82f6', marginBottom: 10, letterSpacing: 1 }}>EXEMPLE : TRADE AMZN</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 10 }}>
+            {[
+              { label: 'ENTRY',  val: '$207.67', color: 'var(--text)' },
+              { label: 'STOP',   val: '$201.50', color: '#ef4444' },
+              { label: 'TARGET', val: '$223.09', color: '#10b981' },
+            ].map(function(p) {
+              return (
+                <div key={p.label} style={{ textAlign: 'center', background: 'var(--bg)', borderRadius: 6, padding: '8px 4px', border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: 9, color: p.color, marginBottom: 3 }}>{p.label}</div>
+                  <div style={{ fontWeight: 700, color: p.color, fontSize: 14 }}>{p.val}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>Shares : <strong style={{ color: 'var(--text)' }}>16</strong></span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>Risque : <strong style={{ color: '#ef4444' }}>$98.72 (0.99%)</strong></span>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>R:R planifié : <strong style={{ color: '#3b82f6' }}>2.5R</strong></span>
+          </div>
+          <div style={{ borderTop: '1px solid rgba(30,41,59,.4)', paddingTop: 8, fontSize: 12 }}>
+            Clôturé à <strong style={{ color: 'var(--text)' }}>$220.50</strong>
+            <span style={{ color: '#94a3b8' }}> → PnL </span><strong style={{ color: '#10b981' }}>+$205.28</strong>
+            <span style={{ color: '#94a3b8' }}> → R réalisé </span><strong style={{ color: '#10b981' }}>+2.08R</strong>
+            <span style={{ marginLeft: 8, background: 'rgba(16,185,129,.15)', color: '#10b981', padding: '1px 8px', borderRadius: 3, fontSize: 11, fontWeight: 700 }}>WIN ✅</span>
+          </div>
+        </div>
+        <div style={sEx}>
+          <div style={{ fontSize: 11, color: '#3b82f6', fontWeight: 700, marginBottom: 6 }}>💡 ASTUCE — Pré-remplissage depuis Analyse SMC</div>
+          <div style={Object.assign({}, sText, s0)}>Depuis l'onglet <strong style={{ color: 'var(--text)' }}>🧠 Analyse SMC</strong>, après avoir calculé le Score Unifié, clique <strong style={{ color: 'var(--text)' }}>"📝 Enregistrer ce trade"</strong> pour pré-remplir automatiquement entry, stop et target dans le Journal.</div>
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 5 : Analyse SMC ── */}
+      <div id="g5" style={sCard}>
+        <STitle icon="🧠" title="Analyser un ticker (SMC + Score Unifié)" />
+        <p style={sText}>Depuis l'onglet <strong style={{ color: 'var(--text)' }}>🧠 Analyse SMC</strong>, deux modes d'analyse sont disponibles.</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div style={{ background: 'rgba(59,130,246,.06)', border: '1px solid rgba(59,130,246,.2)', borderRadius: 8, padding: '14px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6', marginBottom: 8 }}>🧠 Analyse SMC Détaillée</div>
+            {['Structure de marché (BOS/CHoCH)', 'Order Blocks actifs / mitigés', 'Fair Value Gaps (FVG)', 'Liquidity Map (BSL / SSL)', 'Niveaux Discount / Premium / OTE'].map(function(t, i) {
+              return <div key={i} style={Object.assign({}, sText, { marginBottom: 3 })}>• {t}</div>;
+            })}
+          </div>
+          <div style={{ background: 'rgba(251,191,36,.05)', border: '1px solid rgba(251,191,36,.25)', borderRadius: 8, padding: '14px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', marginBottom: 8 }}>🎯 Score Unifié (recommandé)</div>
+            {['Combine setup_detector + SMC en un seul score', 'Score /10 + grade A+ / A / B / C / NO TRADE', 'Checklist visuelle des 9 critères', 'Entry / Stop / Target pré-calculés', 'Reasoning explicatif en texte naturel'].map(function(t, i) {
+              return <div key={i} style={Object.assign({}, sText, { marginBottom: 3 })}>• {t}</div>;
+            })}
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 10 }}>TABLEAU DES GRADES</div>
+        {[
+          { grade: 'A+',       range: '8–10/10', color: '#fbbf24', glow: true,  sizing: 'Sizing normal (1%)',    desc: 'Setup exceptionnel — toutes les étoiles alignées' },
+          { grade: 'A',        range: '6–7/10',  color: '#10b981', glow: false, sizing: 'Sizing normal (1%)',    desc: 'Setup solide — bon à prendre' },
+          { grade: 'B',        range: '4–5/10',  color: '#3b82f6', glow: false, sizing: 'Sizing réduit (0.5%)', desc: 'Setup correct — prudence recommandée' },
+          { grade: 'C',        range: '2–3/10',  color: '#f59e0b', glow: false, sizing: 'À éviter',             desc: 'Setup faible — conditions insuffisantes' },
+          { grade: 'NO TRADE', range: '0–1/10',  color: '#64748b', glow: false, sizing: 'Patience',             desc: 'Pas de setup — la patience est ton edge' },
+        ].map(function(g, i) {
+          return (
+            <div key={i} style={{ display: 'flex', gap: 12, padding: '9px 0', borderBottom: i < 4 ? '1px solid rgba(30,41,59,.4)' : 'none', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ minWidth: 70, fontWeight: 700, fontSize: 12, color: g.color, background: g.color + '15', padding: '2px 8px', borderRadius: 4, border: '1px solid ' + g.color + '30', boxShadow: g.glow ? '0 0 10px ' + g.color + '40' : 'none', textAlign: 'center' }}>{g.grade}</span>
+              <span style={{ minWidth: 58, color: '#64748b', fontSize: 11 }}>{g.range}</span>
+              <span style={{ flex: 1, color: '#94a3b8', fontSize: 12, minWidth: 160 }}>{g.desc}</span>
+              <span style={{ fontSize: 11, color: g.color, fontWeight: 700 }}>{g.sizing}</span>
+            </div>
+          );
+        })}
+        <div style={{ background: 'rgba(59,130,246,.05)', border: '1px solid rgba(59,130,246,.15)', borderRadius: 6, padding: '10px 14px', marginTop: 14 }}>
+          <span style={{ color: '#3b82f6', fontWeight: 700, fontSize: 11 }}>🧪 BADGE MODE DÉMO :</span>
+          <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>Les analyses sont algorithmiques (yfinance). Le mode LIVE avec Claude API produira des analyses plus fines et contextualisées.</span>
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 6 : Performance ── */}
+      <div id="g6" style={sCard}>
+        <STitle icon="📊" title="Lire les métriques de performance" />
+        <p style={sText}>Onglet <strong style={{ color: 'var(--text)' }}>📊 Performance</strong> — tes statistiques de trading sur l'ensemble des trades enregistrés.</p>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 10 }}>6 MÉTRIQUES CLÉS</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 10, marginBottom: 16 }}>
+          {[
+            { name: 'Total PnL',      desc: 'Gain/perte total en $',           target: 'Positif et croissant',       color: '#10b981' },
+            { name: 'Winrate',        desc: '% trades gagnants',               target: 'Objectif > 50%',             color: '#3b82f6' },
+            { name: 'Profit Factor',  desc: 'Gains totaux / Pertes totales',   target: 'Objectif > 1.3, idéal > 1.5', color: '#8b5cf6' },
+            { name: 'Max Drawdown',   desc: 'Pire série de pertes',            target: 'À minimiser (< 10%)',         color: '#ef4444' },
+            { name: 'Expectancy',     desc: 'Gain moyen par trade',            target: 'Doit être positif',           color: '#f59e0b' },
+            { name: 'Total Trades',   desc: 'Nb de trades enregistrés',        target: '50+ pour signal fiable',      color: '#64748b' },
+          ].map(function(m, i) {
+            return (
+              <div key={i} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px' }}>
+                <div style={{ fontWeight: 700, color: m.color, fontSize: 12, marginBottom: 4 }}>{m.name}</div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>{m.desc}</div>
+                <div style={{ fontSize: 10, color: m.color, opacity: .8 }}>{m.target}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>GRAPHIQUES DISPONIBLES</div>
+        {[
+          { name: 'Equity Curve',       desc: 'Évolution de ton capital trade après trade — une courbe qui monte régulièrement = bonne gestion' },
+          { name: 'Heatmap mensuelle',  desc: 'Vert = bon mois, rouge = mauvais mois — identifie les patterns saisonniers dans ton trading' },
+          { name: 'Drawdown',           desc: 'Visualise les périodes de pertes — plus c\'est court et peu profond, mieux c\'est' },
+        ].map(function(g, i) {
+          return (
+            <div key={i} style={{ display: 'flex', gap: 14, padding: '8px 0', borderBottom: i < 2 ? '1px solid rgba(30,41,59,.35)' : 'none' }}>
+              <span style={{ fontWeight: 700, color: 'var(--text)', minWidth: 155, fontSize: 12 }}>{g.name}</span>
+              <span style={{ color: '#94a3b8', fontSize: 12 }}>{g.desc}</span>
+            </div>
+          );
+        })}
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 10, marginTop: 16 }}>EDGE TRACKER</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+          {[
+            { q: 'Par ticker',         a: 'Sur quel ticker tu performes le mieux ?' },
+            { q: 'Par type de setup',  a: 'Quel type de setup te rapporte le plus ?' },
+            { q: 'Par régime marché',  a: 'Trades-tu mieux en BULL, NEUTRAL ou BEAR ?' },
+          ].map(function(e, i) {
+            return (
+              <div key={i} style={{ background: 'rgba(139,92,246,.06)', border: '1px solid rgba(139,92,246,.15)', borderRadius: 6, padding: '10px 12px' }}>
+                <div style={{ fontWeight: 700, color: '#8b5cf6', fontSize: 11, marginBottom: 4 }}>{e.q}</div>
+                <div style={{ fontSize: 11, color: '#94a3b8' }}>{e.a}</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ background: 'rgba(245,158,11,.06)', border: '1px solid rgba(245,158,11,.2)', borderRadius: 6, padding: '10px 14px' }}>
+          <span style={{ color: '#f59e0b', fontWeight: 700, fontSize: 12 }}>⚠️ ATTENTION :</span>
+          <span style={{ color: '#94a3b8', fontSize: 12, marginLeft: 8 }}>Accumule <strong style={{ color: 'var(--text)' }}>50+ trades</strong> avant de tirer des conclusions — moins de 30 trades = pas de signal statistique fiable.</span>
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 7 : Configuration ── */}
+      <div id="g7" style={sCard}>
+        <STitle icon="⚙️" title="Configuration" />
+        <p style={sText}>Fichier <code style={{ color: '#fbbf24', background: 'rgba(251,191,36,.08)', padding: '1px 5px', borderRadius: 3 }}>config/config.yaml</code> — modifiable sans toucher au code Python.</p>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 6 }}>AJOUTER UN TICKER</div>
+        <pre style={sCode}>{`# Dans config/config.yaml, section watchlist :
+watchlist:
+  - {ticker: NVDA, name: NVIDIA}
+  - {ticker: SOFI, name: SoFi Technologies}   # ← ajouter ici
+
+# Dans ticker_aliases (pour la reconnaissance Reddit) :
+ticker_aliases:
+  SoFi: SOFI     # ← ajouter les aliases`}</pre>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 6, marginTop: 14 }}>MODIFIER LES SEUILS D'ALERTES</div>
+        <pre style={sCode}>{`alerts:
+  volume_breakout_multiplier: 2.0    # seuil volume (défaut 2×)
+  sma200_proximity_pct: 1.5          # proximité SMA200 (défaut 1.5%)
+  strong_move_pct: 3.0               # mouvement fort (défaut 3%)
+
+killzone:
+  start: "14:30"                     # heure de début (CET)
+  end: "16:30"                       # heure de fin (CET)
+
+trading:
+  capital: 10000                     # capital à risquer`}</pre>
+        <div style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.2)', borderRadius: 6, padding: '10px 14px', marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: '#10b981', fontWeight: 700, marginBottom: 6 }}>💡 BONNES PRATIQUES</div>
+          {[
+            'Toujours relancer le dashboard après une modification de config.yaml',
+            'Les clés API (Finnhub, Reddit…) sont dans .env — ne jamais commiter ce fichier',
+            'Sauvegarder config.yaml avant toute modification importante',
+          ].map(function(t, i) {
+            return <div key={i} style={{ fontSize: 12, color: '#94a3b8', marginBottom: i < 2 ? 4 : 0 }}>• {t}</div>;
+          })}
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 8 : Scores et alertes ── */}
+      <div id="g8" style={sCard}>
+        <STitle icon="🎯" title="Comprendre les scores et alertes" />
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 10 }}>SCORE COMPOSITE (0–100)</div>
+        <p style={Object.assign({}, sText, { marginBottom: 12 })}>Chaque ticker reçoit un score basé sur <strong style={{ color: 'var(--text)' }}>4 composantes de 25 points</strong> :</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginBottom: 16 }}>
+          {[
+            { name: 'SMA200',  pts: '0–25 pts', color: '#10b981', icon: '📈', items: ['En discount + remontée vers SMA200 : 20–25 pts', 'Proche SMA200 (±1.5%) : 15–20 pts', 'Étendu > 10% au-dessus : 0–10 pts'] },
+            { name: 'Volume',  pts: '0–25 pts', color: '#f59e0b', icon: '📊', items: ['> 2× la moyenne : 25 pts (institutions actives 🔥)', '> 1.5× la moyenne : 18 pts', 'Volume normal : 5 pts'] },
+            { name: 'Reddit',  pts: '0–25 pts', color: '#ef4444', icon: '🔴', items: ['Beaucoup de mentions + sentiment positif : 20–25 pts', 'Quelques mentions pertinentes : 5–10 pts', 'Cross-validé avec les news : bonus +5 pts'] },
+            { name: 'News',    pts: '0–25 pts', color: '#8b5cf6', icon: '📰', items: ['3+ news ticker dans les 24h : 20–25 pts', '1–2 news récentes : 10–15 pts', 'Aucune news : 0 pts'] },
+          ].map(function(comp, ci) {
+            return (
+              <div key={ci} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', background: 'var(--bg)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontWeight: 700, color: comp.color, fontSize: 12 }}>{comp.icon} {comp.name}</span>
+                  <span style={{ fontSize: 10, color: comp.color, background: comp.color + '15', padding: '2px 6px', borderRadius: 3, fontWeight: 700 }}>{comp.pts}</span>
+                </div>
+                {comp.items.map(function(it, ii) {
+                  return <div key={ii} style={{ fontSize: 11, color: '#94a3b8', marginBottom: ii < 2 ? 3 : 0 }}>• {it}</div>;
+                })}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>CONTEXTE MARCHÉ</div>
+        {[
+          { icon: '🟢', regime: 'BULL',    color: '#10b981', cond: 'VIX < 15, SPY positif', action: 'Sizing normal 1%' },
+          { icon: '⚪', regime: 'NEUTRAL', color: '#94a3b8', cond: 'VIX 15–20',              action: 'Sizing réduit 0.5%' },
+          { icon: '🔴', regime: 'BEAR',    color: '#ef4444', cond: 'VIX > 20',               action: 'Sizing minimal ou NO TRADE' },
+        ].map(function(r, i) {
+          return (
+            <div key={i} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: i < 2 ? '1px solid rgba(30,41,59,.35)' : 'none', alignItems: 'center' }}>
+              <span style={{ fontSize: 14, minWidth: 20 }}>{r.icon}</span>
+              <span style={{ fontWeight: 700, color: r.color, minWidth: 72, fontSize: 12 }}>{r.regime}</span>
+              <span style={{ color: '#94a3b8', flex: 1, fontSize: 12 }}>{r.cond}</span>
+              <span style={{ color: r.color, fontSize: 11, fontWeight: 700 }}>{r.action}</span>
+            </div>
+          );
+        })}
+        <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8, marginTop: 14 }}>VERDICTS MACRO</div>
+        {[
+          { icon: '✅', verdict: 'GO',       color: '#10b981', desc: 'Pas d\'événement macro risqué, marché calme → trader normalement' },
+          { icon: '⚠️', verdict: 'PRUDENCE', color: '#f59e0b', desc: 'Événement macro aujourd\'hui → réduire le sizing et la durée des trades' },
+          { icon: '🚫', verdict: 'NO TRADE', color: '#ef4444', desc: 'FOMC / NFP / CPI ou VIX > 25 → ne pas trader, attendre la clarté' },
+        ].map(function(v, i) {
+          return (
+            <div key={i} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: i < 2 ? '1px solid rgba(30,41,59,.35)' : 'none', alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 14, minWidth: 22 }}>{v.icon}</span>
+              <span style={{ fontWeight: 700, color: v.color, minWidth: 82, fontSize: 12 }}>{v.verdict}</span>
+              <span style={{ color: '#94a3b8', fontSize: 12 }}>{v.desc}</span>
+            </div>
+          );
+        })}
+        <BackTop />
+      </div>
+
+    </div>
+  );
+}
+
 var TABS = [
   { id: 'overview',  label: '📊 Vue d\'ensemble' },
   { id: 'watchlist', label: '📈 Watchlist'        },
@@ -2680,7 +3106,8 @@ var TABS = [
   { id: 'setups',    label: '🎯 Setups'           },
   { id: 'smc',       label: '🧠 Analyse SMC'      },
   { id: 'journal',   label: '📝 Journal'          },
-  { id: 'history',   label: '📊 Performance'      }
+  { id: 'history',   label: '📊 Performance'      },
+  { id: 'guide',     label: '❓ Guide'            }
 ];
 
 // Ref module-level pour éviter les stale closures dans setInterval
@@ -3077,6 +3504,7 @@ function TradingDashboard() {
         {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} unifiedData={unifiedData} unifiedLoading={unifiedLoading} scanResults={scanResults} scanLoading={scanLoading} onAnalyze={loadSmcAnalysis} onUnified={loadUnifiedAnalysis} onScan={loadScanUnified} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
         {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} prefillTrade={prefillTrade} onClearPrefill={function() { setPrefillTrade(null); }} /></ErrorBoundary>}
         {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}
+        {tab === 'guide'     && <GuideTab />}
       </main>
       <footer style={{ padding: '8px 24px', borderTop: '1px solid var(--border)', background: 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span className="mc" style={{ fontSize: 10 }}>Données live — Killzone 14h30-16h30 CET</span>
