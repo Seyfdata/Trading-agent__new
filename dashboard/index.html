@@ -1516,6 +1516,372 @@ function AlertsTab(props) {
   );
 }
 
+// ── SMC Analysis Tab ──────────────────────────────────────────────────────
+
+function SmcTab(props) {
+  var smcData    = props.smcData    || {};
+  var smcLoading = props.smcLoading || false;
+  var onAnalyze  = props.onAnalyze  || function() {};
+  var onAddTrade = props.onAddTrade || function() {};
+
+  var selState = useState('NVDA');
+  var selectedTicker = selState[0];
+  var setSelectedTicker = selState[1];
+
+  useEffect(function() {
+    if (!smcData[selectedTicker]) { onAnalyze(selectedTicker); }
+  }, []);
+
+  var analysis = smcData[selectedTicker] || null;
+  var st  = analysis ? (analysis.structure        || {}) : {};
+  var dp  = analysis ? (analysis.discount_premium || {}) : {};
+  var cf  = analysis ? (analysis.confluences      || {}) : {};
+  var su  = analysis ? (analysis.setup            || {}) : {};
+  var liq = analysis ? (analysis.liquidity        || {}) : {};
+  var obs = analysis ? (analysis.order_blocks     || []) : [];
+  var fvgs = analysis ? (analysis.fvg             || []) : [];
+
+  var inp = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', color: 'var(--text)', fontFamily: 'JetBrains Mono,monospace', fontSize: 12 };
+
+  function handleAnalyze() { onAnalyze(selectedTicker); }
+
+  function copyReport() {
+    var text = analysis && analysis.report ? analysis.report : '';
+    if (navigator.clipboard) { navigator.clipboard.writeText(text); }
+  }
+
+  function handleAddTrade() {
+    if (!su.has_setup) return;
+    onAddTrade({
+      ticker:       selectedTicker,
+      entry_price:  su.entry  ? String(su.entry)  : '',
+      stop_price:   su.stop   ? String(su.stop)   : '',
+      target_price: su.target ? String(su.target) : '',
+      setup_type:   'MANUAL',
+      direction:    'LONG',
+      notes:        su.reasoning || '',
+    });
+  }
+
+  // Barre Discount/Premium
+  function DpBar() {
+    if (!dp.range_high || !dp.range_low) return null;
+    var rng  = dp.range_high - dp.range_low;
+    if (rng <= 0) return null;
+    var cp   = analysis.current_price || dp.range_low;
+    var cpPct = Math.max(0, Math.min(100, (cp - dp.range_low) / rng * 100));
+    var oteLowPct  = Math.max(0, Math.min(100, (dp.ote_low  - dp.range_low) / rng * 100));
+    var oteHighPct = Math.max(0, Math.min(100, (dp.ote_high - dp.range_low) / rng * 100));
+    var midPct     = 50;
+    var zoneColor = dp.current_zone === 'DISCOUNT' ? '#10b981' : dp.current_zone === 'OTE' ? '#3b82f6' : '#ef4444';
+    return (
+      <div style={{ marginBottom: 12 }}>
+        {/* Barre */}
+        <div style={{ position: 'relative', height: 20, borderRadius: 4, overflow: 'visible', background: 'linear-gradient(to right, #10b981 0%, #10b981 ' + midPct + '%, #ef4444 ' + midPct + '%, #ef4444 100%)', opacity: .5 }}>
+          {/* OTE overlay */}
+          <div style={{ position: 'absolute', left: oteLowPct + '%', width: (oteHighPct - oteLowPct) + '%', top: 0, bottom: 0, background: 'rgba(59,130,246,.6)', borderLeft: '2px solid #3b82f6', borderRight: '2px solid #3b82f6' }} />
+          {/* Marker prix */}
+          <div style={{ position: 'absolute', left: cpPct + '%', top: -4, width: 3, height: 28, background: zoneColor, borderRadius: 2, transform: 'translateX(-50%)', boxShadow: '0 0 6px ' + zoneColor }} />
+        </div>
+        {/* Labels */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>
+          <span style={{ color: '#10b981' }}>DISC ${dp.range_low.toFixed(2)}</span>
+          <span style={{ color: '#3b82f6' }}>OTE ${dp.ote_low.toFixed(2)}–${dp.ote_high.toFixed(2)}</span>
+          <span>50% ${dp.midpoint ? dp.midpoint.toFixed(2) : '—'}</span>
+          <span style={{ color: '#ef4444' }}>PREM ${dp.range_high.toFixed(2)}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {/* Badge mode démo */}
+      <div style={{ background: 'rgba(59,130,246,.08)', border: '1px solid rgba(59,130,246,.25)', borderRadius: 6, padding: '8px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span className="badge b-accent">🧪 MODE DÉMO</span>
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>Analyse algorithmique — passez en MODE LIVE avec Claude API pour des analyses plus fines</span>
+      </div>
+
+      {/* Sélecteur + bouton */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={selectedTicker}
+          onChange={function(e) { setSelectedTicker(e.target.value); }}
+          style={Object.assign({}, inp, { minWidth: 120 })}>
+          {_J_TICKERS.map(function(tk) { return <option key={tk} value={tk}>{tk}</option>; })}
+        </select>
+        <button className={'btn btn-p'} onClick={handleAnalyze} disabled={smcLoading}>
+          {smcLoading ? <span><span className="spin-anim">⟳</span> Analyse en cours...</span> : '🧠 Analyser'}
+        </button>
+        {analysis && analysis.analysis_date && (
+          <span className="mc" style={{ fontSize: 10 }}>Analysé le {analysis.analysis_date}</span>
+        )}
+      </div>
+
+      {/* Erreur */}
+      {analysis && analysis.error && (
+        <div style={{ color: 'var(--bear)', background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.2)', borderRadius: 6, padding: '10px 14px', marginBottom: 14 }}>
+          ❌ {analysis.error}
+        </div>
+      )}
+
+      {/* Contenu analyse */}
+      {analysis && !analysis.error && (
+        <div>
+          {/* ── Section 1 : Structure de marché */}
+          <div className="stitle">STRUCTURE DE MARCHÉ</div>
+          <div className="card mb16">
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+              {/* Badge biais */}
+              <div style={{
+                padding: '8px 16px', borderRadius: 8, fontWeight: 700, fontSize: 14,
+                background: st.bias === 'BULL' ? 'rgba(16,185,129,.15)' : st.bias === 'BEAR' ? 'rgba(239,68,68,.15)' : 'rgba(100,116,139,.1)',
+                color: st.bias === 'BULL' ? '#10b981' : st.bias === 'BEAR' ? '#ef4444' : '#64748b',
+                border: '1px solid ' + (st.bias === 'BULL' ? 'rgba(16,185,129,.3)' : st.bias === 'BEAR' ? 'rgba(239,68,68,.3)' : 'rgba(100,116,139,.2)'),
+              }}>
+                {st.bias === 'BULL' ? '📈' : st.bias === 'BEAR' ? '📉' : '↔️'} HTF {st.bias || 'RANGE'}
+                {st.last_bos && <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 8 }}>BOS @ ${st.last_bos.price.toFixed(2)}</span>}
+                {st.last_choch && <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 8 }}>CHoCH @ ${st.last_choch.price.toFixed(2)}</span>}
+              </div>
+              {/* Zone actuelle */}
+              {dp.current_zone && (
+                <div style={{
+                  padding: '8px 14px', borderRadius: 8, fontWeight: 700, fontSize: 13,
+                  background: dp.current_zone === 'DISCOUNT' ? 'rgba(16,185,129,.12)' : dp.current_zone === 'OTE' ? 'rgba(59,130,246,.12)' : 'rgba(239,68,68,.12)',
+                  color: dp.current_zone === 'DISCOUNT' ? '#10b981' : dp.current_zone === 'OTE' ? '#3b82f6' : '#ef4444',
+                  border: '1px solid ' + (dp.current_zone === 'DISCOUNT' ? 'rgba(16,185,129,.25)' : dp.current_zone === 'OTE' ? 'rgba(59,130,246,.25)' : 'rgba(239,68,68,.25)'),
+                }}>
+                  {dp.current_zone === 'DISCOUNT' ? '🟢' : dp.current_zone === 'OTE' ? '🔵' : '🔴'} {dp.current_zone}
+                  {analysis.current_price && <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 8 }}>${analysis.current_price.toFixed(2)}</span>}
+                </div>
+              )}
+            </div>
+            {/* Swing levels */}
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              {(st.swing_highs || []).length > 0 && (
+                <div>
+                  <div style={{ fontSize: 10, color: '#ef4444', marginBottom: 4, letterSpacing: 1 }}>SWING HIGHS</div>
+                  <div className="row g8 wrap">
+                    {(st.swing_highs || []).slice(-4).map(function(s, i) {
+                      return <span key={i} className="badge b-bear" style={{ fontSize: 10 }}>${s.price.toFixed(2)} <span style={{ opacity: .6 }}>{s.date}</span></span>;
+                    })}
+                  </div>
+                </div>
+              )}
+              {(st.swing_lows || []).length > 0 && (
+                <div>
+                  <div style={{ fontSize: 10, color: '#10b981', marginBottom: 4, letterSpacing: 1 }}>SWING LOWS</div>
+                  <div className="row g8 wrap">
+                    {(st.swing_lows || []).slice(-4).map(function(s, i) {
+                      return <span key={i} className="badge b-bull" style={{ fontSize: 10 }}>${s.price.toFixed(2)} <span style={{ opacity: .6 }}>{s.date}</span></span>;
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Section 2 : Zones d'intérêt */}
+          <div className="stitle">ZONES D'INTÉRÊT</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 10, marginBottom: 16 }}>
+            {obs.map(function(ob, i) {
+              var isBull = ob.type === 'BULL';
+              var color  = isBull ? '#3b82f6' : '#ef4444';
+              var bg     = isBull ? 'rgba(59,130,246,.08)' : 'rgba(239,68,68,.08)';
+              return (
+                <div key={i} style={{ background: bg, border: '1px solid ' + color + '30', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, color: color, fontSize: 11 }}>{isBull ? '🟢' : '🔴'} {ob.type} OB</span>
+                    <span className={'badge ' + (ob.mitigated ? 'b-muted' : isBull ? 'b-bull' : 'b-bear')} style={{ fontSize: 9 }}>{ob.mitigated ? 'MITIGÉ' : 'ACTIF'}</span>
+                  </div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)' }}>${ob.low.toFixed(2)} – ${ob.high.toFixed(2)}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{ob.date}</div>
+                </div>
+              );
+            })}
+            {fvgs.map(function(fvg, i) {
+              var isBull = fvg.type === 'BULL';
+              var color  = isBull ? '#8b5cf6' : '#f59e0b';
+              var bg     = isBull ? 'rgba(139,92,246,.08)' : 'rgba(245,158,11,.08)';
+              return (
+                <div key={'fvg' + i} style={{ background: bg, border: '1px solid ' + color + '30', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, color: color, fontSize: 11 }}>{isBull ? '📊' : '📉'} FVG {fvg.type}</span>
+                    <span className="badge b-accent" style={{ fontSize: 9 }}>ACTIF</span>
+                  </div>
+                  <div style={{ fontWeight: 700, color: 'var(--text)' }}>${fvg.low.toFixed(2)} – ${fvg.high.toFixed(2)}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{fvg.date}</div>
+                </div>
+              );
+            })}
+            {obs.length === 0 && fvgs.length === 0 && (
+              <div className="card mc" style={{ padding: 16, fontSize: 12 }}>Aucune zone détectée</div>
+            )}
+          </div>
+
+          {/* ── Section 3 : Liquidity Map */}
+          <div className="stitle">LIQUIDITY MAP</div>
+          <div className="card mb16">
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 10, color: '#ef4444', marginBottom: 6, letterSpacing: 1 }}>🔴 BSL — BUY-SIDE LIQUIDITY (cibles haussières)</div>
+                {(liq.bsl_levels || []).length === 0
+                  ? <span className="mc" style={{ fontSize: 11 }}>Aucun niveau</span>
+                  : (liq.bsl_levels || []).map(function(l, i) {
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', flexShrink: 0 }} />
+                          <span style={{ fontWeight: 700 }}>${l.toFixed(2)}</span>
+                          <span className="mc" style={{ fontSize: 10 }}>equal highs</span>
+                        </div>
+                      );
+                    })
+                }
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <div style={{ fontSize: 10, color: '#10b981', marginBottom: 6, letterSpacing: 1 }}>🟢 SSL — SELL-SIDE LIQUIDITY (cibles baissières)</div>
+                {(liq.ssl_levels || []).length === 0
+                  ? <span className="mc" style={{ fontSize: 11 }}>Aucun niveau</span>
+                  : (liq.ssl_levels || []).map(function(l, i) {
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', flexShrink: 0 }} />
+                          <span style={{ fontWeight: 700 }}>${l.toFixed(2)}</span>
+                          <span className="mc" style={{ fontSize: 10 }}>swing low</span>
+                        </div>
+                      );
+                    })
+                }
+              </div>
+            </div>
+          </div>
+
+          {/* ── Section 4 : Discount / Premium */}
+          <div className="stitle">DISCOUNT / PREMIUM / OTE</div>
+          <div className="card mb16">
+            <DpBar />
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginTop: 8 }}>
+              {[
+                { label: 'Range High',  val: dp.range_high, color: '#ef4444' },
+                { label: 'OTE High (62%)', val: dp.ote_high, color: '#3b82f6' },
+                { label: 'Midpoint (50%)', val: dp.midpoint, color: 'var(--muted)' },
+                { label: 'OTE Low (79%)', val: dp.ote_low,  color: '#3b82f6' },
+                { label: 'Range Low',   val: dp.range_low,  color: '#10b981' },
+              ].map(function(r) {
+                return r.val != null ? (
+                  <div key={r.label} style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 9, color: r.color, letterSpacing: 1, marginBottom: 2 }}>{r.label}</div>
+                    <div style={{ fontWeight: 700, color: r.color }}>${r.val.toFixed(2)}</div>
+                  </div>
+                ) : null;
+              })}
+            </div>
+          </div>
+
+          {/* ── Section 5 : Setup */}
+          {su.has_setup && (
+            <div>
+              <div className="stitle">🎯 TRADE SETUP</div>
+              <div className="card mb16" style={{ border: '1px solid rgba(59,130,246,.35)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)' }}>{selectedTicker}</span>
+                    <span className="badge b-bull">LONG</span>
+                    <span className={'badge ' + (cf.conviction === 'HIGH' ? 'b-bull' : cf.conviction === 'MEDIUM' ? 'b-neutral' : 'b-muted')}>
+                      {cf.conviction === 'HIGH' ? '🔥' : cf.conviction === 'MEDIUM' ? '📈' : '📊'} {cf.conviction}
+                    </span>
+                  </div>
+                  <span className="badge b-accent">R:R {su.rr_ratio ? su.rr_ratio.toFixed(2) : '—'}R</span>
+                </div>
+
+                {/* Entry / Stop / Target */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0, marginBottom: 12, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
+                  {[
+                    { label: 'ENTRY',  val: su.entry,  color: 'var(--text)' },
+                    { label: 'STOP',   val: su.stop,   color: 'var(--bear)' },
+                    { label: 'TARGET', val: su.target, color: 'var(--bull)' },
+                  ].map(function(p, pi) {
+                    return (
+                      <div key={p.label} style={{ textAlign: 'center', padding: '10px 4px', borderLeft: pi > 0 ? '1px solid var(--border)' : 'none' }}>
+                        <div style={{ fontSize: 9, color: p.color, marginBottom: 3 }}>{p.label}</div>
+                        <div style={{ fontWeight: 700, color: p.color, fontSize: 15 }}>{p.val ? '$' + p.val.toFixed(2) : '—'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Confluences */}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>CONFLUENCES ({cf.count}/6)</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {(cf.details || []).map(function(d, i) {
+                      var ok = d.startsWith('✅');
+                      return (
+                        <span key={i} style={{ fontSize: 10, color: ok ? '#10b981' : 'var(--muted)', background: ok ? 'rgba(16,185,129,.06)' : 'transparent', padding: '2px 0' }}>{d}</span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Raisonnement */}
+                {su.reasoning && (
+                  <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginBottom: 12, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>
+                    {su.reasoning}
+                  </div>
+                )}
+                {su.invalidation && (
+                  <div style={{ fontSize: 11, color: 'var(--bear)', marginBottom: 12 }}>Invalidation : {su.invalidation}</div>
+                )}
+
+                <button className="btn btn-p" onClick={handleAddTrade}>
+                  📝 Enregistrer ce trade dans le Journal
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Pas de setup */}
+          {!su.has_setup && (
+            <div>
+              <div className="stitle">🎯 SETUP</div>
+              <div className="card mb16" style={{ padding: '12px 16px' }}>
+                <div style={{ color: 'var(--muted)', fontSize: 12 }}>
+                  {su.reasoning || 'Conditions non réunies pour un trade'}
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>CONFLUENCES ({cf.count}/6)</div>
+                  {(cf.details || []).map(function(d, i) {
+                    return <div key={i} style={{ fontSize: 11, color: d.startsWith('✅') ? '#10b981' : 'var(--muted)' }}>{d}</div>;
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Section 6 : Rapport texte */}
+          <div className="stitle">RAPPORT COMPLET</div>
+          <div className="card mb16">
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+              <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={copyReport}>📋 Copier le rapport</button>
+            </div>
+            <pre style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.6, margin: 0 }}>
+              {analysis.report || '—'}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {/* Loading spinner */}
+      {smcLoading && !analysis && (
+        <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--muted)' }}>
+          <div style={{ fontSize: 24, marginBottom: 12 }}><span className="spin-anim">⟳</span></div>
+          <div>Analyse SMC en cours pour {selectedTicker}...</div>
+          <div style={{ fontSize: 11, marginTop: 6 }}>Récupération des données yfinance + détection des structures</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Setups Tab ────────────────────────────────────────────────────────────
 
 var _SETUP_COLOR = { DISCOUNT_ZONE: '#3b82f6', SMA200_BOUNCE: '#10b981', MOMENTUM: '#f59e0b' };
@@ -1690,6 +2056,8 @@ function JournalTab(props) {
   var posMonitor          = props.posMonitor           || { positions: [], alerts: [], checked_at: null };
   var inKillzone          = props.inKillzone            || false;
   var onRefreshPositions  = props.onRefreshPositions    || function() {};
+  var prefillTrade        = props.prefillTrade          || null;
+  var onClearPrefill      = props.onClearPrefill        || function() {};
 
   var ts = useState([]); var trades = ts[0]; var setTrades = ts[1];
   var ls = useState(true); var loading = ls[0]; var setLoading = ls[1];
@@ -1709,6 +2077,15 @@ function JournalTab(props) {
       .finally(function() { setLoading(false); });
   }
   useEffect(function() { loadTrades(); }, []);
+
+  // Pré-remplir le formulaire depuis l'onglet SMC
+  useEffect(function() {
+    if (prefillTrade) {
+      setForm(function(f) { return Object.assign({}, f, prefillTrade); });
+      setSection('form');
+      onClearPrefill();
+    }
+  }, [prefillTrade]);
 
   function setField(k, v) { setForm(function(f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
 
@@ -2176,6 +2553,7 @@ var TABS = [
   { id: 'news',      label: '📰 News'             },
   { id: 'alerts',    label: '⚡ Alertes'          },
   { id: 'setups',    label: '🎯 Setups'           },
+  { id: 'smc',       label: '🧠 Analyse SMC'      },
   { id: 'journal',   label: '📝 Journal'          },
   { id: 'history',   label: '📊 Performance'      }
 ];
@@ -2245,6 +2623,18 @@ function TradingDashboard() {
   var setupsLoadingState = useState(false);
   var setupsLoading      = setupsLoadingState[0];
   var setSetupsLoading   = setupsLoadingState[1];
+
+  var smcDataState   = useState({});   // { ticker: analysisDict }
+  var smcData        = smcDataState[0];
+  var setSmcData     = smcDataState[1];
+
+  var smcLoadingState = useState(false);
+  var smcLoading      = smcLoadingState[0];
+  var setSmcLoading   = smcLoadingState[1];
+
+  var prefillTradeState = useState(null);
+  var prefillTrade      = prefillTradeState[0];
+  var setPrefillTrade   = prefillTradeState[1];
 
   var posMonitorState = useState({ positions: [], alerts: [], checked_at: null, count: 0 });
   var posMonitor      = posMonitorState[0];
@@ -2426,6 +2816,23 @@ function TradingDashboard() {
       .catch(function() { setSetupsLoading(false); });
   }
 
+  function loadSmcAnalysis(ticker) {
+    if (smcLoading) return;
+    setSmcLoading(true);
+    fetch('/api/analysis/' + encodeURIComponent(ticker))
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        setSmcData(function(prev) { var n = Object.assign({}, prev); n[ticker] = json; return n; });
+        setSmcLoading(false);
+      })
+      .catch(function() { setSmcLoading(false); });
+  }
+
+  function handleAddTradeFromSmc(tradeData) {
+    setPrefillTrade(tradeData);
+    setTab('journal');
+  }
+
   function loadPositionMonitor() {
     fetch('/api/positions/monitor')
       .then(function(r) { return r.json(); })
@@ -2502,7 +2909,8 @@ function TradingDashboard() {
         {tab === 'news'      && <NewsTab      data={data} />}
         {tab === 'alerts'    && <AlertsTab alertData={alertData} liveNews={liveNews} countdown={(alertData.in_killzone || testMode) ? countdown : null} testMode={testMode} onSimulate={activateTestMode} posMonitor={posMonitor} />}
         {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} />}
-        {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} /></ErrorBoundary>}
+        {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} onAnalyze={loadSmcAnalysis} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
+        {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} prefillTrade={prefillTrade} onClearPrefill={function() { setPrefillTrade(null); }} /></ErrorBoundary>}
         {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}
       </main>
       <footer style={{ padding: '8px 24px', borderTop: '1px solid var(--border)', background: 'var(--card)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

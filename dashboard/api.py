@@ -15,6 +15,8 @@ Endpoints :
     GET  /api/alerts/news          — nouvelles news depuis le dernier appel
     GET  /api/postmarket           — résumé post-market (top gainers/losers, marché, alertes)
     GET  /api/setups               — setups détectés (DISCOUNT_ZONE, SMA200_BOUNCE, MOMENTUM)
+    GET  /api/analysis/{ticker}   — analyse SMC complète pour un ticker
+    GET  /api/analysis            — analyse SMC des top 5 tickers de la watchlist
     POST /api/refresh              — lance un scan complet en arrière-plan
     POST /api/trades               — créer un nouveau trade
     GET  /api/trades               — liste tous les trades (params: status, limit)
@@ -930,6 +932,50 @@ def get_alerts_news():
         return {"new_news": new_news, "total_checked": len(combined)}
     except Exception as e:
         return {"new_news": [], "total_checked": 0, "error": str(e)}
+
+
+# ── SMC Analysis ─────────────────────────────────────────────────────────────
+
+@app.get("/api/analysis/{ticker}")
+def get_smc_analysis(ticker: str):
+    """Analyse SMC complète (structure, OBs, FVGs, liquidité, setup) pour un ticker."""
+    try:
+        from analysis.smc_analyzer import analyze_ticker, format_smc_report
+        ticker = ticker.upper().strip()
+        analysis = analyze_ticker(ticker)
+        analysis["report"] = format_smc_report(analysis)
+        return clean_for_json(analysis)
+    except Exception as e:
+        return {"error": str(e), "ticker": ticker, "mode": "DEMO"}
+
+
+@app.get("/api/analysis")
+def get_smc_analysis_watchlist():
+    """Analyse SMC des top 5 tickers de la watchlist (peut prendre ~30s)."""
+    try:
+        from analysis.smc_analyzer import analyze_ticker, format_smc_report
+
+        # Essayer de récupérer les tickers les mieux classés depuis la DB
+        try:
+            from database.models import get_score_history
+            rows = get_score_history(limit=5)
+            top_tickers = [r["ticker"] for r in rows[:5]] if rows else WATCHLIST[:5]
+        except Exception:
+            top_tickers = WATCHLIST[:5]
+
+        results = []
+        for t in top_tickers:
+            a = analyze_ticker(t)
+            a["report"] = format_smc_report(a)
+            results.append(clean_for_json(a))
+
+        return clean_for_json({
+            "count":       len(results),
+            "analyses":    results,
+            "analyzed_at": datetime.now().isoformat(),
+        })
+    except Exception as e:
+        return {"error": str(e), "analyses": [], "count": 0}
 
 
 # ── Setup detector ───────────────────────────────────────────────────────────
