@@ -55,10 +55,10 @@ SUBREDDITS: Dict[str, str] = {
     "ValueInvesting": "ValueInvesting",
     "investing": "investing",
     "stocks": "stocks",
-    "buzztickr" : "buzztickr", 
-    "pennystocks" :"pennystocks",
-    "10xPennyStocks": "10xPennyStocks" 
-    
+    "buzztickr"    : "buzztickr",
+    "buzztickers"  : "buzztickers",
+    "pennystocks"  : "pennystocks",
+    "10xPennyStocks": "10xPennyStocks",
 }
 
 HEADERS = {

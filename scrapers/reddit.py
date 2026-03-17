@@ -107,6 +107,13 @@ TICKER_BLACKLIST = {
     "PEAK", "DIPS", "FREE", "RUNS", "SAVE", "EASY", "FAST",
     "RARE", "SURE", "STAY", "KEEP", "CARE", "HOPE", "FEAR",
     "ONES", "TAKE", "TURN", "LIFE", "WORK",
+    # Faux tickers observés en production
+    "VIST", "FEMY", "SIVB",
+    # Verbes, pronoms et mots courts courants en majuscules
+    "ANY", "GET", "GOT", "HAS", "HAD", "HOW", "WHO", "WHY",
+    "WAY", "DAY", "BIG", "OLD", "OWN", "SET", "TRY", "ASK",
+    "RUN", "LET", "SAY", "USE", "MAN", "FAR", "END", "ADD",
+    "AGO", "AVG",
 }
 
 
@@ -289,7 +296,7 @@ def format_reddit_section(refresh=True):
 
 
 def get_reddit_discoveries(
-    min_mentions:    int   = 3,
+    min_mentions:    int   = 2,
     min_market_cap:  float = 1e9,
 ) -> list[dict]:
     """
@@ -299,8 +306,9 @@ def get_reddit_discoveries(
       - Hors watchlist perso (WATCHLIST)
       - Dans VALID_TICKERS OU vérifiés par yfinance
       - PAS dans TICKER_BLACKLIST
-      - >= min_mentions mentions
-      - market_cap >= min_market_cap (défaut 1 Md$, filtre penny stocks)
+      - >= min_mentions mentions (défaut 2)
+      - market_cap >= min_market_cap SI yfinance retourne la donnée
+        (si market_cap indisponible + ticker dans VALID_TICKERS → inclus quand même)
 
     Enrichissement yfinance : price, change_pct, market_cap, sector.
     (Lent ~30-60s si 10 tickers avec sector — à lancer sur bouton manuel.)
@@ -324,6 +332,7 @@ def get_reddit_discoveries(
     outside = df[~df["Ticker"].isin(watchlist_set)].copy()
     outside = outside[outside["Mentions"].fillna(0).astype(int) >= min_mentions]
     outside = outside.sort_values("Mentions", ascending=False)
+    print(f"  [Reddit discoveries] {len(outside)} candidats avec >= {min_mentions} mentions hors watchlist")
 
     try:
         import yfinance as yf
@@ -384,8 +393,14 @@ def get_reddit_discoveries(
             except Exception:
                 pass
 
-        # Filtre market cap
+        # Filtre market cap :
+        # - si market_cap connu et < seuil → exclure (penny stock)
+        # - si market_cap inconnu mais ticker dans VALID_TICKERS → inclure quand même
         if market_cap is not None and market_cap < min_market_cap:
+            print(f"  [Reddit discoveries] {ticker} écarté : cap ${market_cap/1e9:.1f}B < {min_market_cap/1e9:.0f}B$")
+            continue
+        if market_cap is None and not is_known_ticker(ticker):
+            print(f"  [Reddit discoveries] {ticker} écarté : market_cap indisponible et non-VALID_TICKERS")
             continue
 
         # Formatage market cap lisible
@@ -416,6 +431,7 @@ def get_reddit_discoveries(
         if len(discoveries) >= 10:
             break
 
+    print(f"  [Reddit discoveries] {len(outside)} trouvés, {len(discoveries)} après filtres (cap/vérif)")
     return discoveries
 
 

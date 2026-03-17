@@ -429,25 +429,35 @@ def get_reddit():
                 "mentions_avg_5d": td.get("mentions_avg_5d"),
             })
 
-        # ── 6. Tri : vérifiés + cross-validés en premier, puis mentions desc ─
-        def _sort_key(r):
-            if r["verified"] and r["cross_validated"]:
-                return (0, -r["mentions"])
-            if r["verified"]:
-                return (1, -r["mentions"])
-            return (2, -r["mentions"])
+        # ── 6. Séparer watchlist / hors-watchlist ─────────────────────────────
+        # Le tableau principal n'affiche QUE les 22 tickers de la watchlist.
+        # Les tickers hors-watchlist sont réservés à la section Trouvailles.
+        wl_rows  = [r for r in rows if r["in_watchlist"]]
+        wl_seen  = {r["ticker"] for r in wl_rows}
 
-        rows.sort(key=_sort_key)
+        # Garantir que tous les 22 tickers apparaissent (0 mentions si absent du CSV)
+        for ticker in WATCHLIST:
+            if ticker not in wl_seen:
+                wl_rows.append({
+                    "ticker": ticker, "mentions": 0, "net_sentiment": 0,
+                    "sentiment_label": "NEUTRAL", "trade_style": "—",
+                    "subreddits": [], "signals": {}, "in_watchlist": True,
+                    "verified": True, "cross_validated": False,
+                    "trend": "NEW", "trend_pct": None, "mentions_avg_5d": None,
+                })
 
-        # Compte rapide des trouvailles potentielles (sans yfinance)
+        # Tri watchlist : mentions descendantes (0 mentions en bas)
+        wl_rows.sort(key=lambda r: -r["mentions"])
+
+        # Trouvailles potentielles pour le badge Vue d'ensemble (seuil 2)
         discoveries_count = sum(
             1 for r in rows
-            if not r["in_watchlist"] and r["mentions"] >= 3 and r["verified"]
+            if not r["in_watchlist"] and r["mentions"] >= 2 and r["verified"]
         )
 
         return {
-            "count":             len(rows),
-            "data":              rows,
+            "count":             len(wl_rows),
+            "data":              wl_rows,
             "updated_at":        datetime.now().isoformat(),
             "discoveries_count": discoveries_count,
         }
