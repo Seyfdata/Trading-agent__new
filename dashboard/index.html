@@ -930,31 +930,31 @@ function WatchlistTab(props) {
 // ── Reddit Tab ────────────────────────────────────────────────────────────
 
 function RedditTab(props) {
-  var items = (props.data.reddit && props.data.reddit.data) ? props.data.reddit.data : [];
-  var discoveries    = props.discoveries    || [];
-  var discLoading    = props.discLoading    || false;
-  var onLoadDisc     = props.onLoadDisc     || function() {};
-  var onAnalyzeTk    = props.onAnalyzeTk    || function() {};
-  var onAddTemp      = props.onAddTemp      || function() {};
-  var tempWatchlist  = props.tempWatchlist  || [];
-  var tempSet        = {};
+  var items         = (props.data.reddit && props.data.reddit.data) ? props.data.reddit.data : [];
+  var discoveries   = props.discoveries   || [];
+  var discLoading   = props.discLoading   || false;
+  var onLoadDisc    = props.onLoadDisc    || function() {};
+  var onAnalyzeTk   = props.onAnalyzeTk   || function() {};
+  var onAddTemp     = props.onAddTemp     || function() {};
+  var tempWatchlist = props.tempWatchlist || [];
+  var tempSet = {};
   tempWatchlist.forEach(function(t) { tempSet[t.ticker] = true; });
 
-  var totalMent   = items.reduce(function(s, r) { return s + r.mentions; }, 0);
-  var netSent     = items.reduce(function(s, r) { return s + r.net_sentiment; }, 0);
-  var active      = items.filter(function(r) { return r.mentions > 0; }).length;
-  var risingCount = items.filter(function(r) { return r.trend === 'RISING'; }).length;
+  // ── Métriques watchlist (parseInt pour éviter bugs string/NaN) ────────────
+  var totalMent      = items.reduce(function(s, r) { return s + (parseInt(r.mentions) || 0); }, 0);
+  var netSent        = items.reduce(function(s, r) { return s + (parseInt(r.net_sentiment) || 0); }, 0);
+  var activeCount    = items.filter(function(r) { return (parseInt(r.mentions) || 0) > 0; }).length;
+  var risingCount    = items.filter(function(r) { return r.trend === 'RISING'; }).length;
   var confirmedCount = items.filter(function(r) { return r.verified && r.cross_validated; }).length;
 
-  function mentionBadge(mentions) {
-    if (mentions > 10) return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(239,68,68,.18)', color: '#ef4444', border: '1px solid rgba(239,68,68,.35)', borderRadius: 4, padding: '1px 6px' }}>🔥 HOT {mentions}</span>;
-    if (mentions > 5)  return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(245,158,11,.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,.3)',  borderRadius: 4, padding: '1px 6px' }}>🔶 {mentions}</span>;
-    return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(59,130,246,.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.25)', borderRadius: 4, padding: '1px 6px' }}>{mentions}</span>;
-  }
-
-  var chartData = items.slice(0, 12).map(function(r) {
-    return { ticker: r.ticker, mentions: r.mentions, fill: sntClr(r.sentiment_label) };
-  });
+  // ── Graphique : seulement les tickers avec mentions > 0, triés ───────────
+  var chartData = items
+    .filter(function(r) { return (parseInt(r.mentions) || 0) > 0; })
+    .sort(function(a, b) { return (parseInt(b.mentions) || 0) - (parseInt(a.mentions) || 0); })
+    .slice(0, 12)
+    .map(function(r) {
+      return { ticker: r.ticker, mentions: parseInt(r.mentions) || 0, fill: sntClr(r.sentiment_label) };
+    });
 
   function trendBadge(r) {
     var trend = r.trend || 'NEW';
@@ -966,70 +966,93 @@ function RedditTab(props) {
     return <span style={{ color: 'var(--dim)', fontSize: 11 }}>🆕 NEW</span>;
   }
 
+  function sourceBadge(source) {
+    if (source === 'both')        return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(239,68,68,.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,.35)', borderRadius: 4, padding: '1px 6px' }}>🔥 Double source</span>;
+    if (source === 'buzztickers') return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(139,92,246,.15)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,.35)', borderRadius: 4, padding: '1px 6px' }}>📡 buzztickr</span>;
+    return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(59,130,246,.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.25)', borderRadius: 4, padding: '1px 6px' }}>💬 Reddit</span>;
+  }
+
+  function mentionBadge(mentions) {
+    var m = parseInt(mentions) || 0;
+    if (m > 10) return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(239,68,68,.18)', color: '#ef4444', border: '1px solid rgba(239,68,68,.35)', borderRadius: 4, padding: '1px 6px' }}>🔥 HOT {m}</span>;
+    if (m > 5)  return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(245,158,11,.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,.3)', borderRadius: 4, padding: '1px 6px' }}>🔶 {m}</span>;
+    return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(59,130,246,.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.25)', borderRadius: 4, padding: '1px 6px' }}>{m}</span>;
+  }
+
   return (
     <div>
+
+      {/* ═══ ZONE 1 — WATCHLIST REDDIT ══════════════════════════════════════ */}
+      <div className="stitle mb12">📊 WATCHLIST REDDIT</div>
+
+      {/* Métriques */}
       <div className="g3 mb16" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
         <div className="metric"><div className="mval ac">{totalMent}</div><div className="mlbl">Total Mentions</div></div>
-        <div className="metric"><div className="mval" style={{ color: netSent > 0 ? 'var(--bull)' : 'var(--bear)' }}>{netSent > 0 ? '+' : ''}{netSent}</div><div className="mlbl">Sentiment Net</div></div>
-        <div className="metric"><div className="mval pc">{active}</div><div className="mlbl">Tickers Actifs</div></div>
+        <div className="metric">
+          <div className="mval" style={{ color: netSent > 0 ? 'var(--bull)' : netSent < 0 ? 'var(--bear)' : 'var(--text)' }}>
+            {netSent > 0 ? '+' : ''}{netSent}
+          </div>
+          <div className="mlbl">Sentiment Net</div>
+        </div>
+        <div className="metric"><div className="mval pc">{activeCount}/{items.length}</div><div className="mlbl">Tickers Actifs</div></div>
         <div className="metric"><div className="mval" style={{ color: 'var(--bull)' }}>{risingCount}</div><div className="mlbl">En Hausse</div></div>
         <div className="metric"><div className="mval" style={{ color: 'var(--bull)' }}>{confirmedCount}</div><div className="mlbl">Confirmés</div></div>
       </div>
 
-      <div className="card mb16">
-        <div className="stitle" style={{ marginBottom: 14 }}>MENTIONS PAR TICKER</div>
-        <ResponsiveContainer width="100%" height={190}>
-          <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-            <XAxis dataKey="ticker" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
-            <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1e293b', borderRadius: 6, fontFamily: 'JetBrains Mono', fontSize: 11 }} />
-            <Bar dataKey="mentions" radius={[3, 3, 0, 0]}>
-              {chartData.map(function(d, i) { return <Cell key={i} fill={d.fill} />; })}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      {/* Graphique barres — masqué si aucune mention */}
+      {chartData.length > 0 ? (
+        <div className="card mb16">
+          <div className="stitle" style={{ marginBottom: 14 }}>MENTIONS PAR TICKER</div>
+          <ResponsiveContainer width="100%" height={190}>
+            <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+              <XAxis dataKey="ticker" tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono' }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1e293b', borderRadius: 6, fontFamily: 'JetBrains Mono', fontSize: 11 }} />
+              <Bar dataKey="mentions" radius={[3, 3, 0, 0]}>
+                {chartData.map(function(d, i) { return <Cell key={i} fill={d.fill} />; })}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div className="card mb16" style={{ textAlign: 'center', padding: '18px 0', color: 'var(--muted)', fontSize: 12 }}>
+          Aucune mention Reddit sur la watchlist aujourd'hui
+        </div>
+      )}
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Tableau watchlist */}
+      <div className="card mb24" style={{ padding: 0, overflow: 'hidden' }}>
         <table className="tbl">
           <thead>
             <tr><th>Ticker</th><th>Tendance 5j</th><th>Mentions</th><th>Sentiment</th><th>Style</th><th>Subreddits</th></tr>
           </thead>
           <tbody>
             {items.map(function(r) {
+              var hasM = (parseInt(r.mentions) || 0) > 0;
               var sc = STYLE_COLORS[r.trade_style] || '#64748b';
               return (
-                <tr key={r.ticker}>
+                <tr key={r.ticker} style={{ opacity: hasM ? 1 : 0.4 }}>
                   <td>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                      <div className="row g6">
-                        <span style={{ fontWeight: 700, color: r.in_watchlist ? 'var(--text)' : 'var(--muted)' }}>
-                          {r.ticker}{r.in_watchlist && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--accent)' }}>●</span>}
-                        </span>
-                        <a href={'https://www.reddit.com/r/stocks/search/?q=' + r.ticker} target="_blank" rel="noopener"
-                           style={{ fontSize: 10, textDecoration: 'none', color: 'var(--muted)' }}
-                           title="Chercher sur Reddit">🔍</a>
-                      </div>
-                      <div className="row g4 wrap">
-                        {r.cross_validated && r.verified &&
-                          <span style={{ fontSize: 9, background: '#10b98120', color: 'var(--bull)', border: '1px solid #10b98140', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>✅ Confirmé</span>
-                        }
-                        {!r.verified &&
-                          <span style={{ fontSize: 9, background: '#f59e0b20', color: 'var(--neutral)', border: '1px solid #f59e0b40', borderRadius: 4, padding: '1px 5px' }}>⚠️ Non vérifié</span>
-                        }
-                      </div>
+                    <div className="row g6">
+                      <span style={{ fontWeight: hasM ? 700 : 400, color: hasM ? 'var(--text)' : 'var(--muted)' }}>
+                        {r.ticker}
+                        {r.in_watchlist && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--accent)' }}>●</span>}
+                      </span>
+                      {r.cross_validated && r.verified && (
+                        <span style={{ fontSize: 9, background: '#10b98120', color: 'var(--bull)', border: '1px solid #10b98140', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>✅</span>
+                      )}
                     </div>
                   </td>
                   <td>{trendBadge(r)}</td>
                   <td>
-                    <span style={{ fontWeight: 600 }}>{r.mentions}</span>
-                    {r.mentions_avg_5d !== null && r.mentions_avg_5d !== undefined &&
+                    <span style={{ fontWeight: 600 }}>{parseInt(r.mentions) || 0}</span>
+                    {r.mentions_avg_5d != null && (
                       <span className="mc" style={{ marginLeft: 5, fontSize: 10 }}>moy {r.mentions_avg_5d}</span>
-                    }
+                    )}
                   </td>
                   <td>
-                    <span style={{ color: sntClr(r.sentiment_label), fontWeight: 600 }}>{r.net_sentiment > 0 ? '+' : ''}{r.net_sentiment}</span>
+                    <span style={{ color: sntClr(r.sentiment_label), fontWeight: 600 }}>{(parseInt(r.net_sentiment) || 0) > 0 ? '+' : ''}{parseInt(r.net_sentiment) || 0}</span>
                     <span className="mc" style={{ marginLeft: 6, fontSize: 10 }}>{r.sentiment_label}</span>
                   </td>
                   <td>
@@ -1046,90 +1069,73 @@ function RedditTab(props) {
         </table>
       </div>
 
-      {/* ── Trouvailles Reddit ─────────────────────────────────────────────── */}
-      <div className="card mt16" style={{ padding: '14px 18px' }}>
+      {/* ═══ ZONE 2 — TROUVAILLES ════════════════════════════════════════════ */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20 }}>
         <div className="rowb mb12">
           <div>
-            <div style={{ fontWeight: 700, fontSize: 13 }}>🔍 Trouvailles — Tickers hors watchlist en tendance</div>
-            <div className="mc" style={{ fontSize: 11, marginTop: 3 }}>Tickers Reddit vérifiés, cap &gt; 1 Md$, ≥ 3 mentions — scan manuel (30-60s)</div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>🔍 Trouvailles — Tickers hors watchlist</div>
+            <div className="mc" style={{ fontSize: 11, marginTop: 2 }}>Reddit + r/buzztickr — scan manuel (~20s)</div>
           </div>
           <button className={'btn' + (discLoading ? '' : ' btn-p')} onClick={onLoadDisc} disabled={discLoading}
             style={discLoading ? { opacity: 0.65, cursor: 'not-allowed' } : {}}>
-            {discLoading ? <span><span className="spin-anim">⟳</span> Scan...</span> : '🔍 Scanner les trouvailles'}
+            {discLoading ? <span><span className="spin-anim">⟳</span> Scan en cours...</span> : '🔍 Scanner les trouvailles'}
           </button>
         </div>
 
         {!discLoading && discoveries.length === 0 && (
-          <div className="mc" style={{ textAlign: 'center', padding: '20px 0', fontSize: 12 }}>
-            Clique sur "Scanner les trouvailles" pour découvrir des tickers hors watchlist.
+          <div className="mc" style={{ textAlign: 'center', padding: '24px 0', fontSize: 12, borderRadius: 8, background: 'var(--bg)', border: '1px solid var(--border)' }}>
+            Clique sur "Scanner les trouvailles" pour découvrir des tickers en tendance hors watchlist
           </div>
         )}
 
         {discLoading && (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <div style={{ textAlign: 'center', padding: '24px 0', background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)' }}>
             <span className="spin-anim" style={{ fontSize: 22 }}>⟳</span>
-            <div className="mc" style={{ fontSize: 11, marginTop: 8 }}>Vérification des tickers + enrichissement yfinance...</div>
+            <div className="mc" style={{ fontSize: 11, marginTop: 8 }}>Récupération Reddit + r/buzztickr + enrichissement prix...</div>
           </div>
         )}
 
         {discoveries.length > 0 && (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {discoveries.map(function(d) {
-              var isAdded   = !!tempSet[d.ticker];
-              var chgColor  = (d.change_pct == null ? 'var(--muted)' : d.change_pct >= 0 ? 'var(--bull)' : 'var(--bear)');
-              var chgStr    = d.change_pct != null ? ((d.change_pct >= 0 ? '+' : '') + d.change_pct + '%') : '—';
-              var priceStr  = d.price != null ? '$' + d.price : '—';
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            {discoveries.slice(0, 15).map(function(d) {
+              var isAdded  = !!tempSet[d.ticker];
+              var chgColor = d.change_pct == null ? 'var(--muted)' : d.change_pct >= 0 ? 'var(--bull)' : 'var(--bear)';
+              var chgStr   = d.change_pct != null ? ((d.change_pct >= 0 ? '+' : '') + d.change_pct + '%') : '';
+              var priceStr = d.price != null ? '$' + d.price : '—';
               return (
-                <div key={d.ticker} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px' }}>
-                  {/* Ligne 1 : ticker + badges + prix */}
-                  <div className="rowb" style={{ marginBottom: 6 }}>
-                    <div className="row g8" style={{ flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 700, fontSize: 14 }}>{d.ticker}</span>
-                      {mentionBadge(d.mentions)}
-                      {d.source === 'both' && (
-                        <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(239,68,68,.15)', color: '#ef4444', border: '1px solid rgba(239,68,68,.35)', borderRadius: 4, padding: '1px 6px' }}>🔥 Double source</span>
-                      )}
-                      {d.source === 'buzztickers' && (
-                        <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(139,92,246,.15)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,.35)', borderRadius: 4, padding: '1px 6px' }}>📡 buzztickers</span>
-                      )}
-                      {d.source === 'reddit' && (
-                        <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(59,130,246,.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.25)', borderRadius: 4, padding: '1px 6px' }}>💬 Reddit</span>
-                      )}
-                      {d.verified && d.market_cap != null && d.market_cap >= 1e9 && (
-                        <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(16,185,129,.12)', color: '#10b981', border: '1px solid rgba(16,185,129,.3)', borderRadius: 4, padding: '1px 5px' }}>✅ Vérifié</span>
-                      )}
-                      <span style={{ fontSize: 11, color: chgColor, fontWeight: 600 }}>{priceStr} {chgStr}</span>
-                    </div>
-                    <span style={{ fontSize: 10, color: sntClr(d.sentiment_label), fontWeight: 600 }}>{d.net_sentiment > 0 ? '+' : ''}{d.net_sentiment} {d.sentiment_label}</span>
+                <div key={d.ticker} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {/* Ligne 1 : ticker + source + mentions */}
+                  <div className="row g6" style={{ flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{d.ticker}</span>
+                    {sourceBadge(d.source)}
+                    {mentionBadge(d.mentions)}
                   </div>
-                  {/* Ligne 2 : métriques */}
-                  <div className="mc" style={{ fontSize: 11, marginBottom: 8 }}>
-                    {d.sector && <span>{d.sector}  ·  </span>}
-                    {d.market_cap_str && <span>Cap: {d.market_cap_str}  ·  </span>}
-                    {d.dist_sma200 != null && <span>SMA200: <span style={{ color: d.dist_sma200 < 0 ? 'var(--bull)' : 'var(--bear)' }}>{d.dist_sma200 >= 0 ? '+' : ''}{d.dist_sma200}%</span>  ·  </span>}
-                    {d.vol_relative != null && <span>Vol: {d.vol_relative}×moy  ·  </span>}
-                    <span>Subs: {(d.subreddits || []).slice(0, 3).join(', ') || '—'}</span>
+                  {/* Ligne 2 : prix + variation */}
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>
+                    <span style={{ color: priceStr === '—' ? 'var(--muted)' : 'var(--text)' }}>{priceStr}</span>
+                    {chgStr && <span style={{ marginLeft: 8, color: chgColor, fontSize: 12 }}>{chgStr}</span>}
+                    {d.vol_relative != null && (
+                      <span className="mc" style={{ marginLeft: 8, fontSize: 10 }}>vol ×{d.vol_relative}</span>
+                    )}
                   </div>
                   {/* Ligne 3 : actions */}
-                  <div className="row g8" style={{ flexWrap: 'wrap' }}>
-                    <a href={'https://www.tradingview.com/chart/?symbol=' + d.ticker}
-                       target="_blank" rel="noopener" className="btn" style={{ fontSize: 11, padding: '4px 10px', textDecoration: 'none' }}>
-                      📈 TradingView
-                    </a>
-                    <button className="btn btn-p" style={{ fontSize: 11, padding: '4px 10px' }}
+                  <div className="row g6" style={{ flexWrap: 'wrap', marginTop: 'auto' }}>
+                    <button className="btn btn-p" style={{ fontSize: 10, padding: '3px 8px' }}
                       onClick={function() { onAnalyzeTk(d.ticker, d.sector); }}>
                       🧠 Analyser
                     </button>
-                    <button className="btn" style={{ fontSize: 11, padding: '4px 10px',
+                    <button className="btn" style={{ fontSize: 10, padding: '3px 8px',
                       background: isAdded ? 'rgba(16,185,129,.15)' : '',
                       color:      isAdded ? '#10b981' : '',
                       border:     isAdded ? '1px solid rgba(16,185,129,.4)' : '' }}
-                      onClick={function() {
-                        if (isAdded) { /* bouton désactivé visuellement */ return; }
-                        onAddTemp(d.ticker, d.ticker, d.sector);
-                      }}>
+                      onClick={function() { if (!isAdded) { onAddTemp(d.ticker, d.ticker, d.sector); } }}>
                       {isAdded ? '📌 Ajouté' : '➕ Watchlist'}
                     </button>
+                    <a href={'https://www.tradingview.com/chart/?symbol=' + d.ticker}
+                       target="_blank" rel="noopener" className="btn"
+                       style={{ fontSize: 10, padding: '3px 8px', textDecoration: 'none' }}>
+                      📈 Chart
+                    </a>
                   </div>
                 </div>
               );
@@ -1137,6 +1143,7 @@ function RedditTab(props) {
           </div>
         )}
       </div>
+
     </div>
   );
 }
