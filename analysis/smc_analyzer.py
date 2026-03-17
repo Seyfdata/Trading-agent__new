@@ -615,6 +615,18 @@ def _build_setup(
     reward = target - entry
     rr     = round(reward / risk, 2) if risk > 0 else 0.0
 
+    # ── Enforce R:R minimum 2.5 ───────────────────────────────────────────────
+    _MIN_RR = 2.5
+    if risk > 0:
+        min_target = round(entry + _MIN_RR * risk, 2)
+        if target < min_target:
+            target = min_target
+            reward = target - entry
+            rr     = round(reward / risk, 2)
+
+    if rr < _MIN_RR:
+        return {**no_trade, "reasoning": f"R:R insuffisant ({rr:.2f}x < {_MIN_RR}x minimum)"}
+
     parts = []
     if structure.get("bias") == "BULL":
         parts.append("Biais HTF haussier confirmé")

@@ -318,6 +318,24 @@ def unified_analysis(ticker: str) -> dict:
         except Exception:
             pass
 
+    # ── Enforce R:R minimum 2.5 ───────────────────────────────────────────────
+    _MIN_RR = 2.5
+    if entry is not None and stop is not None:
+        _risk = entry - stop
+        if _risk > 0:
+            _min_target = entry + _MIN_RR * _risk
+            if target is None or target < _min_target:
+                target = round(_min_target, 2)
+            _reward = target - entry
+            rr = round(_reward / _risk, 2)
+
+    if rr is not None and rr < _MIN_RR:
+        grade  = "NO TRADE"
+        entry  = None
+        stop   = None
+        target = None
+        rr     = None
+
     # ── 6. Résumé smc_analysis allégé pour le dashboard ─────────────────────
     smc_summary = {
         "bias":       structure.get("bias"),
