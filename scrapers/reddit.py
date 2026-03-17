@@ -114,6 +114,9 @@ TICKER_BLACKLIST = {
     "WAY", "DAY", "BIG", "OLD", "OWN", "SET", "TRY", "ASK",
     "RUN", "LET", "SAY", "USE", "MAN", "FAR", "END", "ADD",
     "AGO", "AVG",
+    # Faux tickers détectés sur r/buzztickr
+    "MAR", "JAN", "FEB", "APR", "MAY", "JUN", "JUL", "AUG",
+    "SEP", "OCT", "NOV", "DEC", "VOO", "BEAR", "BULL",
 }
 
 
@@ -295,6 +298,36 @@ def format_reddit_section(refresh=True):
     return "\n".join(lines)
 
 
+def scan_buzztickers() -> list:
+    """Scrape r/buzztickers pour trouver les tickers trending."""
+    import requests
+    import re
+    url = "https://www.reddit.com/r/buzztickr/new.json?limit=10"
+    headers = {"User-Agent": "SMC-AI-Scanner/1.0"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        data = resp.json()
+        tickers_found = {}
+        for post in data["data"]["children"]:
+            title    = post["data"].get("title", "")
+            selftext = post["data"].get("selftext", "")
+            full_text = title + " " + selftext
+            # $TICKER pattern first (high confidence), then plain uppercase words
+            found = re.findall(r'\$([A-Z]{2,5})', full_text)
+            found += re.findall(r'\b([A-Z]{2,5})\b', full_text)
+            for t in found:
+                t = t.upper()
+                if t not in TICKER_BLACKLIST and len(t) >= 2:
+                    tickers_found[t] = tickers_found.get(t, 0) + 1
+        results = [{"ticker": t, "mentions": c, "source": "buzztickers"}
+                   for t, c in sorted(tickers_found.items(), key=lambda x: -x[1])]
+        print(f"  [buzztickers] {len(results)} tickers trouvés : {[r['ticker'] for r in results[:10]]}")
+        return results
+    except Exception as e:
+        print(f"  [buzztickers] Erreur: {e}")
+        return []
+
+
 def get_reddit_discoveries(
     min_mentions:    int   = 2,
     min_market_cap:  float = 1e9,
@@ -328,10 +361,20 @@ def get_reddit_discoveries(
 
     watchlist_set = set(WATCHLIST)
 
+    # ── Scan buzztickers (source complémentaire) ──────────────────────────────
+    buzz_results = scan_buzztickers()
+    buzz_by_ticker = {r["ticker"]: r["mentions"] for r in buzz_results}
+
     # ── Candidats hors watchlist avec assez de mentions ───────────────────────
     outside = df[~df["Ticker"].isin(watchlist_set)].copy()
     outside = outside[outside["Mentions"].fillna(0).astype(int) >= min_mentions]
     outside = outside.sort_values("Mentions", ascending=False)
+
+    # Ajouter les tickers buzztickers non présents dans le CSV
+    existing_tickers = set(outside["Ticker"].str.upper().tolist())
+    buzz_only = [r for r in buzz_results if r["ticker"] not in existing_tickers
+                 and r["ticker"] not in watchlist_set
+                 and r["ticker"] not in TICKER_BLACKLIST]
     print(f"  [Reddit discoveries] {len(outside)} candidats avec >= {min_mentions} mentions hors watchlist")
 
     try:
@@ -342,10 +385,20 @@ def get_reddit_discoveries(
 
     discoveries: list[dict] = []
 
-    for _, row in outside.head(30).iterrows():   # évalue jusqu'à 30 candidats
+    # Préparer les candidats : CSV d'abord, puis buzztickers-only
+    csv_candidates = []
+    for _, row in outside.head(30).iterrows():
         ticker = str(row.get("Ticker", "")).strip().upper()
-        if not ticker:
-            continue
+        if ticker:
+            csv_candidates.append(("csv", ticker, row))
+
+    buzz_extra_candidates = []
+    for r in buzz_only[:10]:
+        buzz_extra_candidates.append(("buzz", r["ticker"], None))
+
+    all_candidates = csv_candidates + buzz_extra_candidates
+
+    for kind, ticker, row in all_candidates:
         if ticker in TICKER_BLACKLIST:
             continue
 
@@ -356,12 +409,33 @@ def get_reddit_discoveries(
         if not known:
             continue
 
-        mentions  = int(row.get("Mentions", 0))
-        net_sent  = int(row.get("Net_Sentiment", 0))
-        style     = str(row.get("Trade_Style", "?"))
-        subs_raw  = row.get("Subreddits", "")
-        subs      = [s.strip() for s in str(subs_raw).split(",")
-                     if s.strip() and str(subs_raw) != "nan"]
+        if kind == "csv":
+            mentions  = int(row.get("Mentions", 0))
+            net_sent  = int(row.get("Net_Sentiment", 0))
+            style     = str(row.get("Trade_Style", "?"))
+            subs_raw  = row.get("Subreddits", "")
+            subs      = [s.strip() for s in str(subs_raw).split(",")
+                         if s.strip() and str(subs_raw) != "nan"]
+        else:
+            mentions  = buzz_by_ticker.get(ticker, 1)
+            net_sent  = 0
+            style     = "?"
+            subs      = []
+
+        # Fusionner les mentions buzztickers si ticker présent dans les deux sources
+        buzz_mentions = buzz_by_ticker.get(ticker, 0)
+        if buzz_mentions > 0 and kind == "csv":
+            mentions = mentions + buzz_mentions  # additif
+
+        # Déterminer la source
+        in_csv  = kind == "csv" or ticker in existing_tickers
+        in_buzz = buzz_mentions > 0 or kind == "buzz"
+        if in_csv and in_buzz:
+            source = "both"
+        elif in_buzz:
+            source = "buzztickers"
+        else:
+            source = "reddit"
 
         # ── Enrichissement yfinance ───────────────────────────────────────────
         price = market_cap = change_pct = sector = None
@@ -426,6 +500,7 @@ def get_reddit_discoveries(
             "sector":          sector,
             "price":           price,
             "change_pct":      change_pct,
+            "source":          source,
         })
 
         if len(discoveries) >= 10:
@@ -438,6 +513,13 @@ def get_reddit_discoveries(
 # === TEST ===
 if __name__ == "__main__":
     print("=== TEST REDDIT WRAPPER ===\n")
+
+    print("--- scan_buzztickers() ---")
+    buzz = scan_buzztickers()
+    for b in buzz[:10]:
+        print(f"  {b['ticker']:6s}  {b['mentions']} mentions  [{b['source']}]")
+
+    print("\n--- format_reddit_section() ---")
     section = format_reddit_section(refresh=False)
     if section:
         print(section)
