@@ -382,78 +382,77 @@ def get_reddit():
             except Exception:
                 pass
 
-        watchlist_set = set(WATCHLIST)
+        # ── 5. Ensemble autorisé : WATCHLIST + tickers temporaires ──────────────
+        # SEULS ces tickers peuvent apparaître dans le tableau principal.
+        watchlist_set = set(t.upper() for t in WATCHLIST)
+        for t in _TEMP_WATCHLIST.values():
+            watchlist_set.add(t["ticker"].upper())
 
-        # ── 5. Construction des lignes ────────────────────────────────────────
-        rows = []
+        # Compte rapide des trouvailles potentielles AVANT le filtre strict
+        # (tickers hors watchlist vérifiés avec >= 2 mentions dans le CSV)
+        discoveries_count = 0
+        from scrapers.reddit import TICKER_BLACKLIST as _BL
         for _, row in df.iterrows():
-            ticker = str(row.get("Ticker", "")).strip()
-            if not ticker:
-                continue
-            mentions = int(row.get("Mentions", 0))
-            net_sent = int(row.get("Net_Sentiment", 0))
-            style = str(row.get("Trade_Style", "?"))
-            subreddits = row.get("Subreddits", "")
+            tk = str(row.get("Ticker", "")).strip().upper()
+            if tk and tk not in watchlist_set and tk not in _BL:
+                try:
+                    ment = int(row.get("Mentions", 0))
+                except Exception:
+                    ment = 0
+                if ment >= 2 and is_known_ticker(tk):
+                    discoveries_count += 1
 
-            # Tendance 5 jours
-            td = trends.get(ticker, {
-                "mentions_today": mentions,
-                "mentions_avg_5d": None,
-                "trend": "NEW",
-                "trend_pct": None,
-            })
+        # ── 6. Construction des lignes — FILTRE STRICT watchlist_set ──────────
+        # Toute ligne dont le ticker n'est PAS dans watchlist_set est ignorée.
+        csv_by_ticker: dict = {}
+        for _, row in df.iterrows():
+            ticker = str(row.get("Ticker", "")).strip().upper()
+            if not ticker or ticker not in watchlist_set:
+                continue                                   # ← filtre strict ici
+            csv_by_ticker[ticker] = row
 
-            # Vérification ticker : connu statiquement OU confirmé yfinance
-            in_wl = ticker in watchlist_set
-            known = is_known_ticker(ticker)
-            if not known:
-                known = verify_ticker(ticker)  # appel yfinance avec cache
+        # ── 7. Construire une ligne pour CHACUN des 22 tickers (+ temp) ────────
+        wl_rows = []
+        for ticker in sorted(watchlist_set):
+            row = csv_by_ticker.get(ticker)
 
-            # Cross-validation : Reddit ET news
-            cross_validated = ticker in news_tickers
+            if row is not None:
+                try:
+                    mentions = int(row.get("Mentions", 0))
+                except Exception:
+                    mentions = 0
+                try:
+                    net_sent = int(row.get("Net_Sentiment", 0))
+                except Exception:
+                    net_sent = 0
+                style      = str(row.get("Trade_Style", "—"))
+                subreddits = row.get("Subreddits", "")
+                subs_list  = [s.strip() for s in str(subreddits).split(",") if s.strip() and str(subreddits) != "nan"]
+                td = trends.get(ticker, {"trend": "NEW", "trend_pct": None, "mentions_avg_5d": None})
+            else:
+                # Ticker de la watchlist absent du CSV → 0 mentions
+                mentions, net_sent, style, subs_list = 0, 0, "—", []
+                td = {"trend": "NEW", "trend_pct": None, "mentions_avg_5d": None}
 
-            rows.append({
-                "ticker": ticker,
-                "mentions": mentions,
-                "net_sentiment": net_sent,
+            wl_rows.append({
+                "ticker":          ticker,
+                "mentions":        mentions,
+                "net_sentiment":   net_sent,
                 "sentiment_label": "BULL" if net_sent > 0 else "BEAR" if net_sent < 0 else "NEUTRAL",
-                "trade_style": style,
-                "subreddits": str(subreddits).split(",") if subreddits else [],
-                "signals": signals_by_ticker.get(ticker, {}),
-                "in_watchlist": in_wl,
-                # Nouveaux champs ───────────────────────────────────────────
-                "verified": known,
-                "cross_validated": cross_validated,
-                "trend": td.get("trend", "NEW"),
-                "trend_pct": td.get("trend_pct"),
+                "trade_style":     style,
+                "subreddits":      subs_list,
+                "signals":         signals_by_ticker.get(ticker, {}),
+                "in_watchlist":    True,
+                "verified":        True,
+                "cross_validated": ticker in news_tickers,
+                "trend":           td.get("trend", "NEW"),
+                "trend_pct":       td.get("trend_pct"),
                 "mentions_avg_5d": td.get("mentions_avg_5d"),
+                "is_temp":         ticker in {t["ticker"].upper() for t in _TEMP_WATCHLIST.values()},
             })
 
-        # ── 6. Séparer watchlist / hors-watchlist ─────────────────────────────
-        # Le tableau principal n'affiche QUE les 22 tickers de la watchlist.
-        # Les tickers hors-watchlist sont réservés à la section Trouvailles.
-        wl_rows  = [r for r in rows if r["in_watchlist"]]
-        wl_seen  = {r["ticker"] for r in wl_rows}
-
-        # Garantir que tous les 22 tickers apparaissent (0 mentions si absent du CSV)
-        for ticker in WATCHLIST:
-            if ticker not in wl_seen:
-                wl_rows.append({
-                    "ticker": ticker, "mentions": 0, "net_sentiment": 0,
-                    "sentiment_label": "NEUTRAL", "trade_style": "—",
-                    "subreddits": [], "signals": {}, "in_watchlist": True,
-                    "verified": True, "cross_validated": False,
-                    "trend": "NEW", "trend_pct": None, "mentions_avg_5d": None,
-                })
-
-        # Tri watchlist : mentions descendantes (0 mentions en bas)
+        # Tri : mentions descendantes
         wl_rows.sort(key=lambda r: -r["mentions"])
-
-        # Trouvailles potentielles pour le badge Vue d'ensemble (seuil 2)
-        discoveries_count = sum(
-            1 for r in rows
-            if not r["in_watchlist"] and r["mentions"] >= 2 and r["verified"]
-        )
 
         return {
             "count":             len(wl_rows),
