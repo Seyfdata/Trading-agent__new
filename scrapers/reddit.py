@@ -329,185 +329,146 @@ def scan_buzztickers() -> list:
 
 
 def get_reddit_discoveries(
-    min_mentions:    int   = 2,
-    min_market_cap:  float = 1e9,
+    min_mentions_reddit:   int = 2,
+    min_mentions_buzz:     int = 1,
 ) -> list[dict]:
     """
-    Retourne les tickers HORS watchlist découverts sur Reddit.
+    Retourne les tickers HORS watchlist découverts sur Reddit + r/buzztickr.
 
-    Critères :
-      - Hors watchlist perso (WATCHLIST)
-      - Dans VALID_TICKERS OU vérifiés par yfinance
-      - PAS dans TICKER_BLACKLIST
-      - >= min_mentions mentions (défaut 2)
-      - market_cap >= min_market_cap SI yfinance retourne la donnée
-        (si market_cap indisponible + ticker dans VALID_TICKERS → inclus quand même)
-
-    Enrichissement yfinance : price, change_pct, market_cap, sector.
-    (Lent ~30-60s si 10 tickers avec sector — à lancer sur bouton manuel.)
-
-    Retourne les top 10 triés par mentions décroissantes.
+    Logique :
+      - Source 1 (Reddit CSV) : hors watchlist, >= min_mentions_reddit, hors blacklist
+      - Source 2 (buzztickr)  : hors watchlist, >= min_mentions_buzz, hors blacklist
+        → PAS de filtre market_cap ni verify_ticker pour buzztickr (signal trending suffisant)
+      - Fusion : si ticker dans les deux → source="both", mentions additives
+      - Enrichissement LÉGER : price + change_pct via yfinance history(2d) seulement
+        (pas de market_cap, pas de sector, pas de tk.info — trop lent)
+      - Tri : "both" d'abord, puis par mentions décroissantes
+      - Retourne top 20 (max)
     """
-    if not PANDAS_AVAILABLE:
-        return []
-
-    scanner_dir = find_scanner_dir()
-    if scanner_dir is None:
-        return []
-
-    df = read_watchlist(scanner_dir)
-    if df is None or df.empty:
-        return []
-
     watchlist_set = set(WATCHLIST)
 
-    # ── Scan buzztickers (source complémentaire) ──────────────────────────────
+    # ── Source 1 : Reddit CSV ─────────────────────────────────────────────────
+    all_discoveries: list[dict] = []
+
+    if PANDAS_AVAILABLE:
+        scanner_dir = find_scanner_dir()
+        df = read_watchlist(scanner_dir) if scanner_dir else None
+        if df is not None and not df.empty:
+            outside = df[~df["Ticker"].str.upper().isin(watchlist_set)].copy()
+            outside["_ticker"] = outside["Ticker"].str.upper()
+            outside = outside[outside["Mentions"].fillna(0).astype(int) >= min_mentions_reddit]
+            outside = outside.sort_values("Mentions", ascending=False)
+            print(f"  [Discoveries] Reddit CSV : {len(outside)} candidats hors watchlist >= {min_mentions_reddit} mentions")
+            for _, row in outside.head(30).iterrows():
+                ticker = str(row.get("_ticker", row.get("Ticker", ""))).strip().upper()
+                if not ticker or ticker in TICKER_BLACKLIST:
+                    continue
+                mentions = int(row.get("Mentions", 0))
+                net_sent = int(row.get("Net_Sentiment", 0))
+                subs_raw = row.get("Subreddits", "")
+                subs     = [s.strip() for s in str(subs_raw).split(",")
+                            if s.strip() and str(subs_raw) != "nan"]
+                all_discoveries.append({
+                    "ticker":          ticker,
+                    "mentions":        mentions,
+                    "net_sentiment":   net_sent,
+                    "sentiment_label": "BULL" if net_sent > 0 else "BEAR" if net_sent < 0 else "NEUTRAL",
+                    "trade_style":     str(row.get("Trade_Style", "?")),
+                    "subreddits":      subs,
+                    "source":          "reddit",
+                    "price":           None,
+                    "change_pct":      None,
+                    "dist_sma200":     None,
+                    "vol_relative":    None,
+                    "market_cap":      None,
+                    "market_cap_str":  None,
+                    "sector":          None,
+                    "verified":        True,
+                })
+        else:
+            print("  [Discoveries] Reddit CSV : aucune donnée disponible")
+    else:
+        print("  [Discoveries] Reddit CSV : pandas non disponible")
+
+    csv_tickers = {d["ticker"] for d in all_discoveries}
+    print(f"  [Discoveries] Source Reddit CSV : {len(all_discoveries)} tickers")
+
+    # ── Source 2 : buzztickr ──────────────────────────────────────────────────
     buzz_results = scan_buzztickers()
-    buzz_by_ticker = {r["ticker"]: r["mentions"] for r in buzz_results}
+    added_buzz = 0
+    for r in buzz_results:
+        ticker = r["ticker"]
+        if ticker in TICKER_BLACKLIST or ticker in watchlist_set:
+            continue
+        if r["mentions"] < min_mentions_buzz:
+            continue
+        existing = next((d for d in all_discoveries if d["ticker"] == ticker), None)
+        if existing:
+            existing["mentions"] += r["mentions"]
+            existing["source"]    = "both"
+        else:
+            all_discoveries.append({
+                "ticker":          ticker,
+                "mentions":        r["mentions"],
+                "net_sentiment":   0,
+                "sentiment_label": "NEUTRAL",
+                "trade_style":     "?",
+                "subreddits":      [],
+                "source":          "buzztickers",
+                "price":           None,
+                "change_pct":      None,
+                "dist_sma200":     None,
+                "vol_relative":    None,
+                "market_cap":      None,
+                "market_cap_str":  None,
+                "sector":          None,
+                "verified":        True,
+            })
+            added_buzz += 1
 
-    # ── Candidats hors watchlist avec assez de mentions ───────────────────────
-    outside = df[~df["Ticker"].isin(watchlist_set)].copy()
-    outside = outside[outside["Mentions"].fillna(0).astype(int) >= min_mentions]
-    outside = outside.sort_values("Mentions", ascending=False)
+    print(f"  [Discoveries] Source buzztickr : {len(buzz_results)} bruts, {added_buzz} nouveaux ajoutés")
+    print(f"  [Discoveries] Total avant enrichissement : {len(all_discoveries)} tickers")
 
-    # Ajouter les tickers buzztickers non présents dans le CSV
-    existing_tickers = set(outside["Ticker"].str.upper().tolist())
-    buzz_only = [r for r in buzz_results if r["ticker"] not in existing_tickers
-                 and r["ticker"] not in watchlist_set
-                 and r["ticker"] not in TICKER_BLACKLIST]
-    print(f"  [Reddit discoveries] {len(outside)} candidats avec >= {min_mentions} mentions hors watchlist")
+    # ── Tri : "both" d'abord, puis mentions ───────────────────────────────────
+    all_discoveries.sort(key=lambda x: (x["source"] == "both", x["mentions"]), reverse=True)
+    top = all_discoveries[:20]
 
+    # ── Enrichissement LÉGER : price + change_pct seulement ──────────────────
     try:
         import yfinance as yf
         _yf_ok = True
     except ImportError:
         _yf_ok = False
 
-    discoveries: list[dict] = []
-
-    # Préparer les candidats : CSV d'abord, puis buzztickers-only
-    csv_candidates = []
-    for _, row in outside.head(30).iterrows():
-        ticker = str(row.get("Ticker", "")).strip().upper()
-        if ticker:
-            csv_candidates.append(("csv", ticker, row))
-
-    buzz_extra_candidates = []
-    for r in buzz_only[:10]:
-        buzz_extra_candidates.append(("buzz", r["ticker"], None))
-
-    all_candidates = csv_candidates + buzz_extra_candidates
-
-    for kind, ticker, row in all_candidates:
-        if ticker in TICKER_BLACKLIST:
-            continue
-
-        # Validation ticker (cache yfinance)
-        known = is_known_ticker(ticker)
-        if not known:
-            known = verify_ticker(ticker)
-        if not known:
-            continue
-
-        if kind == "csv":
-            mentions  = int(row.get("Mentions", 0))
-            net_sent  = int(row.get("Net_Sentiment", 0))
-            style     = str(row.get("Trade_Style", "?"))
-            subs_raw  = row.get("Subreddits", "")
-            subs      = [s.strip() for s in str(subs_raw).split(",")
-                         if s.strip() and str(subs_raw) != "nan"]
-        else:
-            mentions  = buzz_by_ticker.get(ticker, 1)
-            net_sent  = 0
-            style     = "?"
-            subs      = []
-
-        # Fusionner les mentions buzztickers si ticker présent dans les deux sources
-        buzz_mentions = buzz_by_ticker.get(ticker, 0)
-        if buzz_mentions > 0 and kind == "csv":
-            mentions = mentions + buzz_mentions  # additif
-
-        # Déterminer la source
-        in_csv  = kind == "csv" or ticker in existing_tickers
-        in_buzz = buzz_mentions > 0 or kind == "buzz"
-        if in_csv and in_buzz:
-            source = "both"
-        elif in_buzz:
-            source = "buzztickers"
-        else:
-            source = "reddit"
-
-        # ── Enrichissement yfinance ───────────────────────────────────────────
-        price = market_cap = change_pct = sector = None
-
-        if _yf_ok:
-            try:
-                tk = yf.Ticker(ticker)
-                fi = tk.fast_info
-
-                if hasattr(fi, "last_price") and fi.last_price:
-                    price = round(float(fi.last_price), 2)
-                if hasattr(fi, "market_cap") and fi.market_cap:
-                    market_cap = float(fi.market_cap)
-
-                # Variation journalière
-                hist = tk.history(period="2d", interval="1d")
-                if hist is not None and len(hist) >= 2:
+    enriched_count = 0
+    for d in top:
+        if not _yf_ok:
+            break
+        try:
+            hist = yf.Ticker(d["ticker"]).history(period="5d", interval="1d")
+            if hist is not None and len(hist) >= 1:
+                d["price"] = round(float(hist["Close"].iloc[-1]), 2)
+                if len(hist) >= 2:
                     pc = float(hist["Close"].iloc[-2])
                     lc = float(hist["Close"].iloc[-1])
                     if pc > 0:
-                        change_pct = round((lc - pc) / pc * 100, 2)
+                        d["change_pct"] = round((lc - pc) / pc * 100, 2)
+                # SMA200 si assez d'historique
+                if len(hist) >= 20:
+                    avg_vol  = float(hist["Volume"].tail(20).mean())
+                    last_vol = float(hist["Volume"].iloc[-1])
+                    if avg_vol > 0:
+                        d["vol_relative"] = round(last_vol / avg_vol, 2)
+                enriched_count += 1
+        except Exception:
+            pass  # price reste None — affiché "—" dans le dashboard
 
-                # Secteur (plus lent — appel tk.info)
-                try:
-                    sector = tk.info.get("sector")
-                except Exception:
-                    sector = None
+    print(f"  [Discoveries] Enrichissement yfinance : {enriched_count}/{len(top)} tickers enrichis")
+    print(f"  [Discoveries] Résultat final : {len(top)} trouvailles")
+    for d in top[:10]:
+        print(f"    {d['ticker']:6s}  mentions={d['mentions']:3d}  source={d['source']:12s}  price={d['price']}")
 
-            except Exception:
-                pass
-
-        # Filtre market cap :
-        # - si market_cap connu et < seuil → exclure (penny stock)
-        # - si market_cap inconnu mais ticker dans VALID_TICKERS → inclure quand même
-        if market_cap is not None and market_cap < min_market_cap:
-            print(f"  [Reddit discoveries] {ticker} écarté : cap ${market_cap/1e9:.1f}B < {min_market_cap/1e9:.0f}B$")
-            continue
-        if market_cap is None and not is_known_ticker(ticker):
-            print(f"  [Reddit discoveries] {ticker} écarté : market_cap indisponible et non-VALID_TICKERS")
-            continue
-
-        # Formatage market cap lisible
-        cap_str = None
-        if market_cap:
-            if market_cap >= 1e12:
-                cap_str = f"${market_cap / 1e12:.1f}T"
-            elif market_cap >= 1e9:
-                cap_str = f"${market_cap / 1e9:.1f}B"
-            else:
-                cap_str = f"${market_cap / 1e6:.0f}M"
-
-        discoveries.append({
-            "ticker":          ticker,
-            "mentions":        mentions,
-            "net_sentiment":   net_sent,
-            "sentiment_label": "BULL" if net_sent > 0 else "BEAR" if net_sent < 0 else "NEUTRAL",
-            "trade_style":     style,
-            "subreddits":      subs,
-            "verified":        True,
-            "market_cap":      market_cap,
-            "market_cap_str":  cap_str,
-            "sector":          sector,
-            "price":           price,
-            "change_pct":      change_pct,
-            "source":          source,
-        })
-
-        if len(discoveries) >= 10:
-            break
-
-    print(f"  [Reddit discoveries] {len(outside)} trouvés, {len(discoveries)} après filtres (cap/vérif)")
-    return discoveries
+    return top
 
 
 # === TEST ===

@@ -467,42 +467,44 @@ def get_reddit():
 @app.get("/api/reddit/discoveries")
 def get_reddit_discoveries_endpoint():
     """
-    Scan Reddit pour les tickers hors watchlist (lent ~30-60s, à déclencher manuellement).
-    Filtre : VALID_TICKERS ou vérifiés yfinance, market cap > 1B$, >= 3 mentions.
-    Enrichit chaque ticker avec dist_sma200 et vol_relative.
+    Scan Reddit + r/buzztickr pour les tickers hors watchlist.
+    Pas de filtre market_cap pour buzztickr. Enrichissement léger (prix/variation).
     """
     try:
         from scrapers.reddit import get_reddit_discoveries
         discoveries = get_reddit_discoveries()
 
-        # Mini-analyse technique pour chaque trouvaille
-        enriched = []
-        for d in discoveries:
-            ticker = d["ticker"]
-            mini   = {"dist_sma200": None, "vol_relative": None}
-            if _YF_AVAILABLE:
-                try:
-                    hist = _yf.Ticker(ticker).history(period="1y", interval="1d")
-                    if hist is not None and len(hist) >= 20:
-                        avg_vol  = float(hist["Volume"].tail(20).mean())
-                        last_vol = float(hist["Volume"].iloc[-1])
-                        if avg_vol > 0:
-                            mini["vol_relative"] = round(last_vol / avg_vol, 2)
-                    if hist is not None and len(hist) >= 200:
-                        sma200 = float(hist["Close"].tail(200).mean())
-                        last   = float(hist["Close"].iloc[-1])
-                        if sma200 > 0:
-                            mini["dist_sma200"] = round((last - sma200) / sma200 * 100, 1)
-                except Exception:
-                    pass
-            enriched.append({**d, **mini})
+        if not discoveries:
+            # Fallback : retourner les tickers buzztickr bruts si tout est vide
+            from scrapers.reddit import scan_buzztickers, TICKER_BLACKLIST
+            from config.settings import WATCHLIST
+            watchlist_set = set(WATCHLIST)
+            buzz = scan_buzztickers()
+            fallback = [
+                {"ticker": r["ticker"], "mentions": r["mentions"], "source": "buzztickers",
+                 "net_sentiment": 0, "sentiment_label": "NEUTRAL", "trade_style": "?",
+                 "subreddits": [], "verified": False, "price": None, "change_pct": None,
+                 "dist_sma200": None, "vol_relative": None,
+                 "market_cap": None, "market_cap_str": None, "sector": None,
+                 "unfiltered": True}
+                for r in buzz
+                if r["ticker"] not in TICKER_BLACKLIST and r["ticker"] not in watchlist_set
+            ][:10]
+            return clean_for_json({
+                "discoveries":   fallback,
+                "scan_date":     datetime.now().isoformat(),
+                "total_scanned": len(fallback),
+                "fallback":      True,
+            })
 
         return clean_for_json({
-            "discoveries":   enriched,
+            "discoveries":   discoveries,
             "scan_date":     datetime.now().isoformat(),
-            "total_scanned": len(enriched),
+            "total_scanned": len(discoveries),
         })
     except Exception as e:
+        import traceback
+        print(f"[/api/reddit/discoveries] ERREUR: {e}\n{traceback.format_exc()}")
         return {"error": str(e), "discoveries": [], "scan_date": datetime.now().isoformat(), "total_scanned": 0}
 
 
