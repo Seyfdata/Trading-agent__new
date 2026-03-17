@@ -288,6 +288,137 @@ def format_reddit_section(refresh=True):
     return "\n".join(lines)
 
 
+def get_reddit_discoveries(
+    min_mentions:    int   = 3,
+    min_market_cap:  float = 1e9,
+) -> list[dict]:
+    """
+    Retourne les tickers HORS watchlist découverts sur Reddit.
+
+    Critères :
+      - Hors watchlist perso (WATCHLIST)
+      - Dans VALID_TICKERS OU vérifiés par yfinance
+      - PAS dans TICKER_BLACKLIST
+      - >= min_mentions mentions
+      - market_cap >= min_market_cap (défaut 1 Md$, filtre penny stocks)
+
+    Enrichissement yfinance : price, change_pct, market_cap, sector.
+    (Lent ~30-60s si 10 tickers avec sector — à lancer sur bouton manuel.)
+
+    Retourne les top 10 triés par mentions décroissantes.
+    """
+    if not PANDAS_AVAILABLE:
+        return []
+
+    scanner_dir = find_scanner_dir()
+    if scanner_dir is None:
+        return []
+
+    df = read_watchlist(scanner_dir)
+    if df is None or df.empty:
+        return []
+
+    watchlist_set = set(WATCHLIST)
+
+    # ── Candidats hors watchlist avec assez de mentions ───────────────────────
+    outside = df[~df["Ticker"].isin(watchlist_set)].copy()
+    outside = outside[outside["Mentions"].fillna(0).astype(int) >= min_mentions]
+    outside = outside.sort_values("Mentions", ascending=False)
+
+    try:
+        import yfinance as yf
+        _yf_ok = True
+    except ImportError:
+        _yf_ok = False
+
+    discoveries: list[dict] = []
+
+    for _, row in outside.head(30).iterrows():   # évalue jusqu'à 30 candidats
+        ticker = str(row.get("Ticker", "")).strip().upper()
+        if not ticker:
+            continue
+        if ticker in TICKER_BLACKLIST:
+            continue
+
+        # Validation ticker (cache yfinance)
+        known = is_known_ticker(ticker)
+        if not known:
+            known = verify_ticker(ticker)
+        if not known:
+            continue
+
+        mentions  = int(row.get("Mentions", 0))
+        net_sent  = int(row.get("Net_Sentiment", 0))
+        style     = str(row.get("Trade_Style", "?"))
+        subs_raw  = row.get("Subreddits", "")
+        subs      = [s.strip() for s in str(subs_raw).split(",")
+                     if s.strip() and str(subs_raw) != "nan"]
+
+        # ── Enrichissement yfinance ───────────────────────────────────────────
+        price = market_cap = change_pct = sector = None
+
+        if _yf_ok:
+            try:
+                tk = yf.Ticker(ticker)
+                fi = tk.fast_info
+
+                if hasattr(fi, "last_price") and fi.last_price:
+                    price = round(float(fi.last_price), 2)
+                if hasattr(fi, "market_cap") and fi.market_cap:
+                    market_cap = float(fi.market_cap)
+
+                # Variation journalière
+                hist = tk.history(period="2d", interval="1d")
+                if hist is not None and len(hist) >= 2:
+                    pc = float(hist["Close"].iloc[-2])
+                    lc = float(hist["Close"].iloc[-1])
+                    if pc > 0:
+                        change_pct = round((lc - pc) / pc * 100, 2)
+
+                # Secteur (plus lent — appel tk.info)
+                try:
+                    sector = tk.info.get("sector")
+                except Exception:
+                    sector = None
+
+            except Exception:
+                pass
+
+        # Filtre market cap
+        if market_cap is not None and market_cap < min_market_cap:
+            continue
+
+        # Formatage market cap lisible
+        cap_str = None
+        if market_cap:
+            if market_cap >= 1e12:
+                cap_str = f"${market_cap / 1e12:.1f}T"
+            elif market_cap >= 1e9:
+                cap_str = f"${market_cap / 1e9:.1f}B"
+            else:
+                cap_str = f"${market_cap / 1e6:.0f}M"
+
+        discoveries.append({
+            "ticker":          ticker,
+            "mentions":        mentions,
+            "net_sentiment":   net_sent,
+            "sentiment_label": "BULL" if net_sent > 0 else "BEAR" if net_sent < 0 else "NEUTRAL",
+            "trade_style":     style,
+            "subreddits":      subs,
+            "verified":        True,
+            "market_cap":      market_cap,
+            "market_cap_str":  cap_str,
+            "sector":          sector,
+            "price":           price,
+            "change_pct":      change_pct,
+        })
+
+        if len(discoveries) >= 10:
+            break
+
+    return discoveries
+
+
 # === TEST ===
 if __name__ == "__main__":
     print("=== TEST REDDIT WRAPPER ===\n")

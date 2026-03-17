@@ -680,9 +680,14 @@ function OverviewTab(props) {
   var posMonitor       = props.posMonitor        || { positions: [], count: 0 };
   var scanResults      = props.scanResults       || [];
   var onGoToSmc        = props.onGoToSmc         || function() {};
+  var onGoToReddit     = props.onGoToReddit      || function() {};
   var inst = (data.market && data.market.instruments) ? data.market.instruments : {};
   var macroInds = (data.market && data.market.macro_indicators) ? data.market.macro_indicators : [];
   var redditItems = (data.reddit && data.reddit.data) ? data.reddit.data.filter(function(r) { return r.in_watchlist; }).slice(0, 5) : [];
+  // Trouvailles Reddit : tickers hors watchlist vérifiés ≥ 3 mentions
+  var discItems = (data.reddit && data.reddit.data) ?
+    data.reddit.data.filter(function(r) { return !r.in_watchlist && r.mentions >= 3 && r.verified; })
+    .sort(function(a, b) { return b.mentions - a.mentions; }).slice(0, 5) : [];
   var newsItems = data.news ? [].concat(data.news.ticker_news || [], data.news.market_news || []).slice(0, 5) : [];
 
   return (
@@ -759,6 +764,22 @@ function OverviewTab(props) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {discItems.length > 0 && (
+        <div className="card mb16" style={{ padding: '10px 16px' }}>
+          <div className="rowb mb8">
+            <span className="stitle" style={{ marginBottom: 0 }}>🔍 Trouvailles Reddit</span>
+            <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={onGoToReddit}>
+              Voir détails →
+            </button>
+          </div>
+          <div className="mc" style={{ fontSize: 11 }}>
+            {discItems.map(function(d, i) {
+              return <span key={d.ticker}>{i > 0 ? '  ·  ' : ''}<span style={{ fontWeight: 600, color: 'var(--text)' }}>{d.ticker}</span> ({d.mentions} ment.)</span>;
+            })}
+          </div>
         </div>
       )}
 
@@ -910,11 +931,26 @@ function WatchlistTab(props) {
 
 function RedditTab(props) {
   var items = (props.data.reddit && props.data.reddit.data) ? props.data.reddit.data : [];
+  var discoveries    = props.discoveries    || [];
+  var discLoading    = props.discLoading    || false;
+  var onLoadDisc     = props.onLoadDisc     || function() {};
+  var onAnalyzeTk    = props.onAnalyzeTk    || function() {};
+  var onAddTemp      = props.onAddTemp      || function() {};
+  var tempWatchlist  = props.tempWatchlist  || [];
+  var tempSet        = {};
+  tempWatchlist.forEach(function(t) { tempSet[t.ticker] = true; });
+
   var totalMent   = items.reduce(function(s, r) { return s + r.mentions; }, 0);
   var netSent     = items.reduce(function(s, r) { return s + r.net_sentiment; }, 0);
   var active      = items.filter(function(r) { return r.mentions > 0; }).length;
   var risingCount = items.filter(function(r) { return r.trend === 'RISING'; }).length;
   var confirmedCount = items.filter(function(r) { return r.verified && r.cross_validated; }).length;
+
+  function mentionBadge(mentions) {
+    if (mentions > 10) return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(239,68,68,.18)', color: '#ef4444', border: '1px solid rgba(239,68,68,.35)', borderRadius: 4, padding: '1px 6px' }}>🔥 HOT {mentions}</span>;
+    if (mentions > 5)  return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(245,158,11,.15)', color: '#f59e0b', border: '1px solid rgba(245,158,11,.3)',  borderRadius: 4, padding: '1px 6px' }}>🔶 {mentions}</span>;
+    return <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(59,130,246,.12)', color: '#3b82f6', border: '1px solid rgba(59,130,246,.25)', borderRadius: 4, padding: '1px 6px' }}>{mentions}</span>;
+  }
 
   var chartData = items.slice(0, 12).map(function(r) {
     return { ticker: r.ticker, mentions: r.mentions, fill: sntClr(r.sentiment_label) };
@@ -1008,6 +1044,89 @@ function RedditTab(props) {
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* ── Trouvailles Reddit ─────────────────────────────────────────────── */}
+      <div className="card mt16" style={{ padding: '14px 18px' }}>
+        <div className="rowb mb12">
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>🔍 Trouvailles — Tickers hors watchlist en tendance</div>
+            <div className="mc" style={{ fontSize: 11, marginTop: 3 }}>Tickers Reddit vérifiés, cap &gt; 1 Md$, ≥ 3 mentions — scan manuel (30-60s)</div>
+          </div>
+          <button className={'btn' + (discLoading ? '' : ' btn-p')} onClick={onLoadDisc} disabled={discLoading}
+            style={discLoading ? { opacity: 0.65, cursor: 'not-allowed' } : {}}>
+            {discLoading ? <span><span className="spin-anim">⟳</span> Scan...</span> : '🔍 Scanner les trouvailles'}
+          </button>
+        </div>
+
+        {!discLoading && discoveries.length === 0 && (
+          <div className="mc" style={{ textAlign: 'center', padding: '20px 0', fontSize: 12 }}>
+            Clique sur "Scanner les trouvailles" pour découvrir des tickers hors watchlist.
+          </div>
+        )}
+
+        {discLoading && (
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <span className="spin-anim" style={{ fontSize: 22 }}>⟳</span>
+            <div className="mc" style={{ fontSize: 11, marginTop: 8 }}>Vérification des tickers + enrichissement yfinance...</div>
+          </div>
+        )}
+
+        {discoveries.length > 0 && (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {discoveries.map(function(d) {
+              var isAdded   = !!tempSet[d.ticker];
+              var chgColor  = (d.change_pct == null ? 'var(--muted)' : d.change_pct >= 0 ? 'var(--bull)' : 'var(--bear)');
+              var chgStr    = d.change_pct != null ? ((d.change_pct >= 0 ? '+' : '') + d.change_pct + '%') : '—';
+              var priceStr  = d.price != null ? '$' + d.price : '—';
+              return (
+                <div key={d.ticker} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px' }}>
+                  {/* Ligne 1 : ticker + badges + prix */}
+                  <div className="rowb" style={{ marginBottom: 6 }}>
+                    <div className="row g8" style={{ flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: 14 }}>{d.ticker}</span>
+                      {mentionBadge(d.mentions)}
+                      {d.verified && d.market_cap != null && d.market_cap >= 1e9 && (
+                        <span style={{ fontSize: 9, fontWeight: 700, background: 'rgba(16,185,129,.12)', color: '#10b981', border: '1px solid rgba(16,185,129,.3)', borderRadius: 4, padding: '1px 5px' }}>✅ Vérifié</span>
+                      )}
+                      <span style={{ fontSize: 11, color: chgColor, fontWeight: 600 }}>{priceStr} {chgStr}</span>
+                    </div>
+                    <span style={{ fontSize: 10, color: sntClr(d.sentiment_label), fontWeight: 600 }}>{d.net_sentiment > 0 ? '+' : ''}{d.net_sentiment} {d.sentiment_label}</span>
+                  </div>
+                  {/* Ligne 2 : métriques */}
+                  <div className="mc" style={{ fontSize: 11, marginBottom: 8 }}>
+                    {d.sector && <span>{d.sector}  ·  </span>}
+                    {d.market_cap_str && <span>Cap: {d.market_cap_str}  ·  </span>}
+                    {d.dist_sma200 != null && <span>SMA200: <span style={{ color: d.dist_sma200 < 0 ? 'var(--bull)' : 'var(--bear)' }}>{d.dist_sma200 >= 0 ? '+' : ''}{d.dist_sma200}%</span>  ·  </span>}
+                    {d.vol_relative != null && <span>Vol: {d.vol_relative}×moy  ·  </span>}
+                    <span>Subs: {(d.subreddits || []).slice(0, 3).join(', ') || '—'}</span>
+                  </div>
+                  {/* Ligne 3 : actions */}
+                  <div className="row g8" style={{ flexWrap: 'wrap' }}>
+                    <a href={'https://www.tradingview.com/chart/?symbol=' + d.ticker}
+                       target="_blank" rel="noopener" className="btn" style={{ fontSize: 11, padding: '4px 10px', textDecoration: 'none' }}>
+                      📈 TradingView
+                    </a>
+                    <button className="btn btn-p" style={{ fontSize: 11, padding: '4px 10px' }}
+                      onClick={function() { onAnalyzeTk(d.ticker, d.sector); }}>
+                      🧠 Analyser
+                    </button>
+                    <button className="btn" style={{ fontSize: 11, padding: '4px 10px',
+                      background: isAdded ? 'rgba(16,185,129,.15)' : '',
+                      color:      isAdded ? '#10b981' : '',
+                      border:     isAdded ? '1px solid rgba(16,185,129,.4)' : '' }}
+                      onClick={function() {
+                        if (isAdded) { /* bouton désactivé visuellement */ return; }
+                        onAddTemp(d.ticker, d.ticker, d.sector);
+                      }}>
+                      {isAdded ? '📌 Ajouté' : '➕ Watchlist'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1522,16 +1641,24 @@ function AlertsTab(props) {
 // ── SMC Analysis Tab ──────────────────────────────────────────────────────
 
 function SmcTab(props) {
-  var smcData        = props.smcData        || {};
-  var smcLoading     = props.smcLoading     || false;
-  var unifiedData    = props.unifiedData    || {};
-  var unifiedLoading = props.unifiedLoading || false;
-  var scanResults    = props.scanResults    || [];
-  var scanLoading    = props.scanLoading    || false;
-  var onAnalyze      = props.onAnalyze      || function() {};
-  var onUnified      = props.onUnified      || function() {};
-  var onScan         = props.onScan         || function() {};
-  var onAddTrade     = props.onAddTrade     || function() {};
+  var smcData             = props.smcData             || {};
+  var smcLoading          = props.smcLoading          || false;
+  var unifiedData         = props.unifiedData         || {};
+  var unifiedLoading      = props.unifiedLoading      || false;
+  var scanResults         = props.scanResults         || [];
+  var scanLoading         = props.scanLoading         || false;
+  var extraTickers        = props.extraTickers        || [];
+  var forceTicker         = props.forceTicker         || null;
+  var onClearForceTicker  = props.onClearForceTicker  || function() {};
+  var onAnalyze           = props.onAnalyze           || function() {};
+  var onUnified           = props.onUnified           || function() {};
+  var onScan              = props.onScan              || function() {};
+  var onAddTrade          = props.onAddTrade          || function() {};
+
+  // Dropdown : watchlist + tickers temporaires (dédupliqués)
+  var allTickers = _J_TICKERS.concat(extraTickers.filter(function(t) {
+    return _J_TICKERS.indexOf(t) < 0;
+  }));
 
   var selState = useState('NVDA');
   var selectedTicker = selState[0];
@@ -1540,6 +1667,14 @@ function SmcTab(props) {
   useEffect(function() {
     if (!smcData[selectedTicker]) { onAnalyze(selectedTicker); }
   }, []);
+
+  // Quand forceTicker change (depuis "Analyser" sur une découverte Reddit)
+  useEffect(function() {
+    if (forceTicker && forceTicker !== selectedTicker) {
+      setSelectedTicker(forceTicker);
+      onClearForceTicker();
+    }
+  }, [forceTicker]);
 
   var analysis = smcData[selectedTicker] || null;
   var st  = analysis ? (analysis.structure        || {}) : {};
@@ -1631,7 +1766,10 @@ function SmcTab(props) {
         <select value={selectedTicker}
           onChange={function(e) { setSelectedTicker(e.target.value); }}
           style={Object.assign({}, inp, { minWidth: 120 })}>
-          {_J_TICKERS.map(function(tk) { return <option key={tk} value={tk}>{tk}</option>; })}
+          {allTickers.map(function(tk) {
+            var isExtra = extraTickers.indexOf(tk) >= 0;
+            return <option key={tk} value={tk}>{isExtra ? '📌 ' + tk : tk}</option>;
+          })}
         </select>
         <button className={'btn btn-p'} onClick={handleAnalyze} disabled={smcLoading || unifiedLoading}>
           {smcLoading ? <span><span className="spin-anim">⟳</span> En cours...</span> : '🧠 Analyse SMC'}
@@ -2094,6 +2232,9 @@ function SetupsTab(props) {
                     <span style={{ fontSize: 11, color: color, fontWeight: 600 }}>
                       {_SETUP_LABEL[s.setup_type] || s.setup_type}
                     </span>
+                    {s.is_discovery && (
+                      <span style={{ fontSize: 9, background: 'rgba(251,191,36,.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,.3)', borderRadius: 4, padding: '1px 6px', fontWeight: 700 }}>📌 Découverte Reddit</span>
+                    )}
                     {s.detected_at && (
                       <span className="mc" style={{ fontSize: 10 }}>{s.detected_at}</span>
                     )}
@@ -3208,6 +3349,26 @@ function TradingDashboard() {
   var posMonitor      = posMonitorState[0];
   var setPosMonitor   = posMonitorState[1];
 
+  var discoveriesState   = useState([]);
+  var discoveries        = discoveriesState[0];
+  var setDiscoveries     = discoveriesState[1];
+
+  var discLoadingState   = useState(false);
+  var discLoading        = discLoadingState[0];
+  var setDiscLoading     = discLoadingState[1];
+
+  var tempWatchlistState = useState([]);
+  var tempWatchlist      = tempWatchlistState[0];
+  var setTempWatchlist   = tempWatchlistState[1];
+
+  var extraTickersState  = useState([]);
+  var extraTickers       = extraTickersState[0];
+  var setExtraTickers    = extraTickersState[1];
+
+  var smcForceTickerState = useState(null);
+  var smcForceTicker      = smcForceTickerState[0];
+  var setSmcForceTicker   = smcForceTickerState[1];
+
   useEffect(function() {
     // Charger chaque endpoint indépendamment — mise à jour dès réception, timeout 15s
     var eps = ['market', 'tickers', 'reddit', 'news', 'macro', 'history'];
@@ -3378,7 +3539,9 @@ function TradingDashboard() {
   function loadSetups() {
     if (setupsLoading) return;
     setSetupsLoading(true);
-    fetch('/api/setups')
+    var extra = tempWatchlist.map(function(t) { return t.ticker; }).join(',');
+    var url   = extra ? '/api/setups?extra_tickers=' + encodeURIComponent(extra) : '/api/setups';
+    fetch(url)
       .then(function(r) { return r.json(); })
       .then(function(json) { setSetupsData(json); setSetupsLoading(false); })
       .catch(function() { setSetupsLoading(false); });
@@ -3430,6 +3593,45 @@ function TradingDashboard() {
       .then(function(r) { return r.json(); })
       .then(function(json) { setPosMonitor(json); })
       .catch(function() {});
+  }
+
+  function loadDiscoveries() {
+    if (discLoading) return;
+    setDiscLoading(true);
+    fetch('/api/reddit/discoveries')
+      .then(function(r) { return r.json(); })
+      .then(function(json) { setDiscoveries(json.discoveries || []); setDiscLoading(false); })
+      .catch(function() { setDiscLoading(false); });
+  }
+
+  function addTempTicker(ticker, name, sector) {
+    fetch('/api/watchlist/temp', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ticker: ticker, name: name || ticker, sector: sector || null }),
+    }).then(function() {
+      setTempWatchlist(function(prev) {
+        if (prev.find(function(t) { return t.ticker === ticker; })) return prev;
+        return prev.concat([{ ticker: ticker, name: name || ticker, sector: sector, is_temp: true }]);
+      });
+    }).catch(function() {});
+  }
+
+  function removeTempTicker(ticker) {
+    fetch('/api/watchlist/temp/' + encodeURIComponent(ticker), { method: 'DELETE' })
+      .then(function() {
+        setTempWatchlist(function(prev) { return prev.filter(function(t) { return t.ticker !== ticker; }); });
+      }).catch(function() {});
+  }
+
+  function analyzeDiscovery(ticker) {
+    setExtraTickers(function(prev) {
+      if (prev.indexOf(ticker) >= 0) return prev;
+      return prev.concat([ticker]);
+    });
+    setSmcForceTicker(ticker);
+    setTab('smc');
+    loadSmcAnalysis(ticker);
   }
 
   var fmtTime = function(d) { return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
@@ -3495,13 +3697,13 @@ function TradingDashboard() {
       </nav>
 
       <main className="content">
-        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} />}
+        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} />}
         {tab === 'watchlist' && <WatchlistTab data={data} />}
-        {tab === 'reddit'    && <RedditTab    data={data} />}
+        {tab === 'reddit'    && <RedditTab data={data} discoveries={discoveries} discLoading={discLoading} onLoadDisc={loadDiscoveries} onAnalyzeTk={analyzeDiscovery} onAddTemp={addTempTicker} tempWatchlist={tempWatchlist} />}
         {tab === 'news'      && <NewsTab      data={data} />}
         {tab === 'alerts'    && <AlertsTab alertData={alertData} liveNews={liveNews} countdown={(alertData.in_killzone || testMode) ? countdown : null} testMode={testMode} onSimulate={activateTestMode} posMonitor={posMonitor} />}
         {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} />}
-        {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} unifiedData={unifiedData} unifiedLoading={unifiedLoading} scanResults={scanResults} scanLoading={scanLoading} onAnalyze={loadSmcAnalysis} onUnified={loadUnifiedAnalysis} onScan={loadScanUnified} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
+        {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} unifiedData={unifiedData} unifiedLoading={unifiedLoading} scanResults={scanResults} scanLoading={scanLoading} extraTickers={extraTickers} forceTicker={smcForceTicker} onClearForceTicker={function() { setSmcForceTicker(null); }} onAnalyze={loadSmcAnalysis} onUnified={loadUnifiedAnalysis} onScan={loadScanUnified} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
         {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} prefillTrade={prefillTrade} onClearPrefill={function() { setPrefillTrade(null); }} /></ErrorBoundary>}
         {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}
         {tab === 'guide'     && <GuideTab />}

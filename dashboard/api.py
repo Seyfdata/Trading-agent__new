@@ -8,6 +8,10 @@ Endpoints :
     GET  /api/market               — contexte marché scoré
     GET  /api/tickers              — watchlist scorée + classée
     GET  /api/reddit               — données Reddit (lecture fichiers existants)
+    GET  /api/reddit/discoveries   — tickers hors watchlist détectés sur Reddit (lent, manuel)
+    GET  /api/watchlist/temp       — watchlist temporaire (en mémoire, reset au redémarrage)
+    POST /api/watchlist/temp       — ajouter un ticker temporaire {ticker, name, sector}
+    DELETE /api/watchlist/temp/{ticker} — retirer un ticker temporaire
     GET  /api/news                 — news filtrées avec sentiment
     GET  /api/macro                — calendrier macro du jour
     GET  /api/history              — historique des scores (14j)
@@ -15,6 +19,7 @@ Endpoints :
     GET  /api/alerts/news          — nouvelles news depuis le dernier appel
     GET  /api/postmarket           — résumé post-market (top gainers/losers, marché, alertes)
     GET  /api/setups               — setups détectés (DISCOUNT_ZONE, SMA200_BOUNCE, MOMENTUM)
+                                     query: extra_tickers=SOFI,ROKU  (tickers temporaires)
     GET  /api/analysis/{ticker}   — analyse SMC complète pour un ticker
     GET  /api/analysis            — analyse SMC des top 5 tickers de la watchlist
     GET  /api/unified/{ticker}    — score de conviction unifié (setup_detector + SMC)
@@ -104,6 +109,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Watchlist temporaire (en mémoire, reset au redémarrage) ─────────────────
+# {ticker: {ticker, name, sector, added_at, is_temp}}
+_TEMP_WATCHLIST: dict = {}
+
 
 # Initialise la DB au démarrage du serveur
 @app.on_event("startup")
@@ -429,13 +439,100 @@ def get_reddit():
 
         rows.sort(key=_sort_key)
 
+        # Compte rapide des trouvailles potentielles (sans yfinance)
+        discoveries_count = sum(
+            1 for r in rows
+            if not r["in_watchlist"] and r["mentions"] >= 3 and r["verified"]
+        )
+
         return {
-            "count": len(rows),
-            "data": rows,
-            "updated_at": datetime.now().isoformat(),
+            "count":             len(rows),
+            "data":              rows,
+            "updated_at":        datetime.now().isoformat(),
+            "discoveries_count": discoveries_count,
         }
     except Exception as e:
-        return {"error": str(e), "data": []}
+        return {"error": str(e), "data": [], "discoveries_count": 0}
+
+
+@app.get("/api/reddit/discoveries")
+def get_reddit_discoveries_endpoint():
+    """
+    Scan Reddit pour les tickers hors watchlist (lent ~30-60s, à déclencher manuellement).
+    Filtre : VALID_TICKERS ou vérifiés yfinance, market cap > 1B$, >= 3 mentions.
+    Enrichit chaque ticker avec dist_sma200 et vol_relative.
+    """
+    try:
+        from scrapers.reddit import get_reddit_discoveries
+        discoveries = get_reddit_discoveries()
+
+        # Mini-analyse technique pour chaque trouvaille
+        enriched = []
+        for d in discoveries:
+            ticker = d["ticker"]
+            mini   = {"dist_sma200": None, "vol_relative": None}
+            if _YF_AVAILABLE:
+                try:
+                    hist = _yf.Ticker(ticker).history(period="1y", interval="1d")
+                    if hist is not None and len(hist) >= 20:
+                        avg_vol  = float(hist["Volume"].tail(20).mean())
+                        last_vol = float(hist["Volume"].iloc[-1])
+                        if avg_vol > 0:
+                            mini["vol_relative"] = round(last_vol / avg_vol, 2)
+                    if hist is not None and len(hist) >= 200:
+                        sma200 = float(hist["Close"].tail(200).mean())
+                        last   = float(hist["Close"].iloc[-1])
+                        if sma200 > 0:
+                            mini["dist_sma200"] = round((last - sma200) / sma200 * 100, 1)
+                except Exception:
+                    pass
+            enriched.append({**d, **mini})
+
+        return clean_for_json({
+            "discoveries":   enriched,
+            "scan_date":     datetime.now().isoformat(),
+            "total_scanned": len(enriched),
+        })
+    except Exception as e:
+        return {"error": str(e), "discoveries": [], "scan_date": datetime.now().isoformat(), "total_scanned": 0}
+
+
+# ── Watchlist temporaire ──────────────────────────────────────────────────────
+
+@app.get("/api/watchlist/temp")
+def get_temp_watchlist():
+    """Retourne la watchlist temporaire (tickers ajoutés depuis Reddit discoveries)."""
+    return {"tickers": list(_TEMP_WATCHLIST.values()), "count": len(_TEMP_WATCHLIST)}
+
+
+@app.post("/api/watchlist/temp")
+async def add_temp_ticker(request: Request):
+    """Ajoute un ticker temporaire. Body JSON : {ticker, name?, sector?}"""
+    try:
+        body   = await request.json()
+        ticker = str(body.get("ticker", "")).upper().strip()
+        if not ticker:
+            return {"error": "ticker requis"}
+        _TEMP_WATCHLIST[ticker] = {
+            "ticker":   ticker,
+            "name":     body.get("name", ticker),
+            "sector":   body.get("sector"),
+            "added_at": datetime.now().isoformat(),
+            "is_temp":  True,
+        }
+        return {"success": True, "ticker": ticker}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/api/watchlist/temp/{ticker}")
+def remove_temp_ticker(ticker: str):
+    """Retire un ticker de la watchlist temporaire."""
+    ticker = ticker.upper().strip()
+    if ticker in _TEMP_WATCHLIST:
+        del _TEMP_WATCHLIST[ticker]
+        return {"success": True}
+    return {"success": False, "error": "ticker non trouvé"}
 
 
 @app.get("/api/news")
@@ -1011,8 +1108,12 @@ def get_unified_scan(top_n: int = 5):
 # ── Setup detector ───────────────────────────────────────────────────────────
 
 @app.get("/api/setups")
-def get_setups():
-    """Setups détectés sur la watchlist : DISCOUNT_ZONE, SMA200_BOUNCE, MOMENTUM."""
+def get_setups(extra_tickers: str = ""):
+    """
+    Setups détectés sur la watchlist : DISCOUNT_ZONE, SMA200_BOUNCE, MOMENTUM.
+    query param extra_tickers : tickers supplémentaires séparés par virgule (ex: SOFI,ROKU).
+    Les setups des extra_tickers portent is_discovery=True.
+    """
     try:
         import os
         try:
@@ -1023,11 +1124,16 @@ def get_setups():
         from analysis.setup_detector import detect_setups, calculate_position_size
         capital = float(os.getenv("CAPITAL", 10000))
 
-        setups = detect_setups()
+        extras     = [t.strip().upper() for t in extra_tickers.split(",") if t.strip()] if extra_tickers else []
+        extras_set = set(extras)
+        wl_set     = set(WATCHLIST)
+        combined   = list(WATCHLIST) + [t for t in extras if t not in wl_set]
+
+        setups   = detect_setups(combined if extras else None)
         enriched = []
         for s in setups:
             pos = calculate_position_size(s["entry"], s["stop"], capital)
-            enriched.append({**s, "position": pos})
+            enriched.append({**s, "position": pos, "is_discovery": s["ticker"] in extras_set})
 
         return clean_for_json({
             "count":      len(enriched),
