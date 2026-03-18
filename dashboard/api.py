@@ -1490,6 +1490,51 @@ def get_performance():
         return clean_for_json(dict(_empty, error=str(e)))
 
 
+@app.get("/api/performance/advanced")
+def get_performance_advanced():
+    """
+    Métriques avancées de performance : Sharpe, Sortino, Calmar, Kelly, Monte Carlo.
+    Monte Carlo est lent (1-3s) — appelé manuellement depuis le dashboard.
+    """
+    _empty_adv = {
+        "n_trades": 0,
+        "sharpe_ratio": None, "sortino_ratio": None, "calmar_ratio": None,
+        "expectancy": {}, "kelly_criterion": None, "profit_factor": None,
+        "max_consecutive_wins": None, "max_consecutive_losses": None,
+        "monte_carlo": None, "r_distribution": {},
+        "message": "Pas encore de trades clôturés.",
+    }
+    try:
+        import sqlite3 as _sq
+        from analysis.advanced_metrics import calculate_all_advanced_metrics
+
+        with _sq.connect(DB_PATH) as conn:
+            conn.row_factory = _sq.Row
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status != 'OPEN' ORDER BY date_close ASC"
+            ).fetchall()
+        trades = [dict(r) for r in rows]
+
+        if not trades:
+            return clean_for_json(_empty_adv)
+
+        result = calculate_all_advanced_metrics(trades)
+
+        # Message explicatif si pas assez de données
+        n = result["n_trades"]
+        if n < 20:
+            result["message"] = (
+                f"{n} trade(s) clôturé(s). "
+                "Accumule 10+ pour Sharpe/Sortino/Calmar, 20+ pour Monte Carlo."
+            )
+        else:
+            result["message"] = None
+
+        return clean_for_json(result)
+    except Exception as e:
+        return clean_for_json(dict(_empty_adv, error=str(e)))
+
+
 # ── Test pages ────────────────────────────────────────────────────────────────
 
 @app.get("/journal-test", response_class=HTMLResponse)

@@ -1425,6 +1425,10 @@ function PerformanceTab() {
   var ls = useState(true);  var loading = ls[0];  var setLoading = ls[1];
   var es = useState(null);  var err = es[0];      var setErr = es[1];
 
+  var advState    = useState(null);  var adv = advState[0];        var setAdv = advState[1];
+  var advLoadState = useState(false); var advLoading = advLoadState[0]; var setAdvLoading = advLoadState[1];
+  var advDoneState = useState(false); var advDone = advDoneState[0];    var setAdvDone = advDoneState[1];
+
   useEffect(function() {
     setLoading(true);
     fetch('/api/performance')
@@ -1432,6 +1436,15 @@ function PerformanceTab() {
       .then(function(d) { setPerf(d); setLoading(false); })
       .catch(function(e) { setErr(String(e)); setLoading(false); });
   }, []);
+
+  function loadAdvanced() {
+    if (advLoading) return;
+    setAdvLoading(true);
+    fetch('/api/performance/advanced')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setAdv(d); setAdvLoading(false); setAdvDone(true); })
+      .catch(function(e) { setAdvLoading(false); });
+  }
 
   if (loading) return <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>Chargement des statistiques...</div>;
   if (err)     return <div className="card" style={{ color: 'var(--bear)', padding: 20 }}>Erreur : {err}</div>;
@@ -1525,6 +1538,232 @@ function PerformanceTab() {
           )}
         </>
       )}
+
+      {/* ── Métriques Avancées ── */}
+      <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div className="stitle" style={{ margin: 0 }}>MÉTRIQUES AVANCÉES</div>
+          {!advDone && (
+            <button className="btn btn-p" onClick={loadAdvanced} disabled={advLoading} style={{ fontSize: 12 }}>
+              {advLoading
+                ? <span><span className="spin-anim">⟳</span> Simulation en cours... (1000 scénarios)</span>
+                : '📈 Calculer métriques avancées'}
+            </button>
+          )}
+        </div>
+
+        {!advDone && !advLoading && (
+          <div className="card" style={{ textAlign: 'center', padding: '28px 24px', color: 'var(--muted)' }}>
+            <div style={{ fontSize: 28, marginBottom: 10 }}>📈</div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Sharpe · Sortino · Calmar · Kelly · Monte Carlo</div>
+            <div style={{ fontSize: 12 }}>Clique "Calculer métriques avancées" pour lancer l'analyse (Monte Carlo = ~2s).</div>
+          </div>
+        )}
+
+        {advLoading && (
+          <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
+            <span className="spin-anim" style={{ fontSize: 24 }}>⟳</span>
+            <div style={{ marginTop: 10, fontSize: 12 }}>Simulation Monte Carlo en cours... (1000 scénarios)</div>
+          </div>
+        )}
+
+        {advDone && adv && (function() {
+          var n = adv.n_trades || 0;
+          var enoughBasic = n >= 10;
+          var enoughMC    = n >= 20;
+          var muted = 'var(--muted)';
+
+          function ratioColor(v, threshGreen, threshOrange) {
+            if (v == null) return muted;
+            if (v >= threshGreen)  return '#10b981';
+            if (v >= threshOrange) return '#f59e0b';
+            return '#ef4444';
+          }
+
+          var sharpe  = adv.sharpe_ratio;
+          var sortino = adv.sortino_ratio;
+          var calmar  = adv.calmar_ratio;
+          var kelly   = adv.kelly_criterion;
+          var kellyPct = kelly != null ? Math.round(kelly * 100 * 10) / 10 : null;
+          var safeKellyPct = kellyPct != null ? Math.round(kellyPct * 0.25 * 10) / 10 : null;
+          var exp = adv.expectancy || {};
+          var er  = exp.edge_ratio;
+          var epr = exp.expectancy_per_r;
+          var mc  = adv.monte_carlo;
+          var rdist = adv.r_distribution || {};
+
+          var metrics6 = [
+            { label: 'Sharpe Ratio',  val: sharpe,  fmt: function(v) { return String(v); }, color: ratioColor(sharpe,  1.5, 0.5), sub: '≥1.5 excellent' },
+            { label: 'Sortino Ratio', val: sortino, fmt: function(v) { return String(v); }, color: ratioColor(sortino, 2.0, 1.0), sub: '≥2.0 excellent' },
+            { label: 'Calmar Ratio',  val: calmar,  fmt: function(v) { return String(v); }, color: ratioColor(calmar,  3.0, 1.0), sub: '≥3.0 excellent' },
+            { label: 'Kelly %',       val: kellyPct, fmt: function(v) { return v + '%'; }, color: kellyPct != null && kellyPct > 0 ? '#f59e0b' : muted, sub: safeKellyPct != null ? '25% Kelly = ' + safeKellyPct + '%' : null },
+            { label: 'Edge Ratio',    val: er,       fmt: function(v) { return v + 'x'; }, color: ratioColor(er,    2.0, 1.5), sub: 'avg win / avg loss' },
+            { label: 'Exp / R',       val: epr,      fmt: function(v) { return v + 'R'; }, color: epr != null && epr > 0 ? '#10b981' : '#ef4444', sub: 'gain moyen par R' },
+          ];
+
+          return (
+            <div>
+              {adv.message && (
+                <div style={{ fontSize: 12, color: '#f59e0b', background: 'rgba(245,158,11,.08)', border: '1px solid rgba(245,158,11,.2)', borderRadius: 6, padding: '8px 14px', marginBottom: 12 }}>
+                  📊 {adv.message}
+                </div>
+              )}
+
+              {/* 6 cartes métriques */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10, marginBottom: 16 }}>
+                {metrics6.map(function(m, i) {
+                  var hasVal = m.val != null && enoughBasic;
+                  return (
+                    <div key={i} className="card" style={{ padding: '12px 10px', textAlign: 'center', opacity: hasVal ? 1 : 0.45 }}>
+                      <div style={{ fontSize: 9, color: muted, letterSpacing: 1, marginBottom: 6 }}>{m.label}</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: hasVal ? m.color : muted }}>{hasVal ? m.fmt(m.val) : '—'}</div>
+                      {m.sub && <div style={{ fontSize: 9, color: muted, marginTop: 4 }}>{m.sub}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Warning Kelly */}
+              {kellyPct != null && enoughBasic && safeKellyPct != null && (
+                <div style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245,158,11,.07)', border: '1px solid rgba(245,158,11,.2)', borderRadius: 6, padding: '8px 14px', marginBottom: 16 }}>
+                  ⚠️ Kelly Criterion ({kellyPct}%) est agressif. En pratique, utilise max 25% du Kelly, soit <strong>{safeKellyPct}%</strong> du capital par trade.
+                </div>
+              )}
+
+              {/* Séries + distribution R */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+                <div className="card" style={{ padding: '14px 16px' }}>
+                  <div style={{ fontSize: 10, color: muted, letterSpacing: 1, marginBottom: 10 }}>STATISTIQUES DÉTAILLÉES</div>
+                  <div style={{ fontSize: 12, marginBottom: 6 }}>
+                    🔥 Max wins consécutifs : <strong style={{ color: '#10b981' }}>{adv.max_consecutive_wins != null ? adv.max_consecutive_wins : '—'}</strong>
+                    {'   '}💀 Max losses : <strong style={{ color: '#ef4444' }}>{adv.max_consecutive_losses != null ? adv.max_consecutive_losses : '—'}</strong>
+                  </div>
+                  {adv.profit_factor != null && (
+                    <div style={{ fontSize: 12 }}>Profit Factor : <strong style={{ color: adv.profit_factor >= 1.5 ? '#10b981' : '#f59e0b' }}>{adv.profit_factor}x</strong></div>
+                  )}
+                </div>
+
+                <div className="card" style={{ padding: '14px 16px' }}>
+                  <div style={{ fontSize: 10, color: muted, letterSpacing: 1, marginBottom: 10 }}>DISTRIBUTION DES R</div>
+                  {Object.keys(rdist).length > 0 ? (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 50 }}>
+                      {Object.entries(rdist).map(function(entry, i) {
+                        var label = entry[0]; var cnt = entry[1];
+                        var maxCnt = Math.max.apply(null, Object.values(rdist)) || 1;
+                        var h = Math.round(cnt / maxCnt * 44);
+                        var isPos = label.startsWith('+');
+                        var isNeg = label.startsWith('-');
+                        var barColor = isPos ? '#10b981' : isNeg ? '#ef4444' : 'var(--muted)';
+                        return (
+                          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+                            <div style={{ fontSize: 9, color: barColor, marginBottom: 2 }}>{cnt}</div>
+                            <div style={{ width: '100%', height: h + 'px', background: barColor, borderRadius: '2px 2px 0 0', opacity: 0.8 }} />
+                            <div style={{ fontSize: 8, color: muted, marginTop: 3 }}>{label}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: muted }}>Pas de données R disponibles</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Monte Carlo */}
+              {enoughMC && mc ? (
+                <div className="card" style={{ padding: '16px' }}>
+                  <div style={{ fontSize: 10, color: muted, letterSpacing: 1, marginBottom: 14 }}>
+                    SIMULATION MONTE CARLO — {mc.n_simulations} scénarios · {mc.n_trades} trades simulés
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 16, alignItems: 'start' }}>
+                    {/* Graphique equity curves */}
+                    <div style={{ height: 160, position: 'relative' }}>
+                      {(function() {
+                        var curves = mc.equity_curves || [];
+                        if (!curves.length) return null;
+                        var nPts = curves[0].length;
+                        var allVals = curves.reduce(function(acc, c) { return acc.concat(c); }, []);
+                        var minV = Math.min.apply(null, allVals);
+                        var maxV = Math.max.apply(null, allVals);
+                        var range = maxV - minV || 1;
+                        var W = 340; var H = 140;
+                        function toX(i) { return Math.round(i / (nPts - 1) * W); }
+                        function toY(v) { return Math.round(H - (v - minV) / range * H); }
+                        function curvePath(c) {
+                          return c.map(function(v, i) { return (i === 0 ? 'M' : 'L') + toX(i) + ',' + toY(v); }).join(' ');
+                        }
+                        // Médiane
+                        var medianCurve = curves[Math.floor(curves.length / 2)];
+                        // 5e et 95e parmi les 50 courbes sauvées
+                        var sorted50 = curves.slice().sort(function(a, b) { return a[a.length-1] - b[b.length-1]; });
+                        var worstCurve = sorted50[0];
+                        var bestCurve  = sorted50[sorted50.length - 1];
+                        return (
+                          <svg viewBox={'0 0 ' + W + ' ' + H} style={{ width: '100%', height: '100%' }} preserveAspectRatio="none">
+                            {/* Lignes de fond */}
+                            {[0, 0.25, 0.5, 0.75, 1].map(function(f, i) {
+                              var y = Math.round(f * H);
+                              return <line key={i} x1={0} y1={y} x2={W} y2={y} stroke="var(--border)" strokeWidth={0.5} />;
+                            })}
+                            {/* 50 courbes simulées en transparence */}
+                            {curves.map(function(c, i) {
+                              return <path key={i} d={curvePath(c)} fill="none" stroke="var(--accent)" strokeWidth={0.4} opacity={0.15} />;
+                            })}
+                            {/* Pire scénario (rouge pointillé) */}
+                            <path d={curvePath(worstCurve)} fill="none" stroke="#ef4444" strokeWidth={1.2} strokeDasharray="4,3" opacity={0.8} />
+                            {/* Meilleur scénario (vert pointillé) */}
+                            <path d={curvePath(bestCurve)} fill="none" stroke="#10b981" strokeWidth={1.2} strokeDasharray="4,3" opacity={0.8} />
+                            {/* Médiane (blanc plein) */}
+                            <path d={curvePath(medianCurve)} fill="none" stroke="var(--text)" strokeWidth={1.8} opacity={0.9} />
+                          </svg>
+                        );
+                      })()}
+                      <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 9, color: muted }}>
+                        <span style={{ color: 'var(--text)' }}>— Médiane</span>
+                        <span style={{ color: '#10b981' }}>-- Meilleur (95e pct)</span>
+                        <span style={{ color: '#ef4444' }}>-- Pire (5e pct)</span>
+                      </div>
+                    </div>
+                    {/* Statistiques */}
+                    <div style={{ minWidth: 160, fontSize: 12 }}>
+                      {[
+                        { label: 'PnL médian',         val: (mc.median_pnl >= 0 ? '+' : '') + '$' + Math.round(mc.median_pnl).toLocaleString(), color: mc.median_pnl >= 0 ? '#10b981' : '#ef4444' },
+                        { label: 'Pire scénario (5%)', val: (mc.pnl_5th >= 0 ? '+' : '') + '$' + Math.round(mc.pnl_5th).toLocaleString(),   color: mc.pnl_5th >= 0 ? '#10b981' : '#ef4444' },
+                        { label: 'Meilleur scénario',  val: '+$' + Math.round(mc.pnl_95th).toLocaleString(),  color: '#10b981' },
+                        { label: 'Prob. rentable',     val: mc.prob_profitable + '%',   color: mc.prob_profitable >= 80 ? '#10b981' : '#f59e0b' },
+                        { label: 'Risque de ruine',    val: mc.prob_ruin + '%',         color: mc.prob_ruin > 5 ? '#ef4444' : muted },
+                        { label: 'Max DD médian',      val: '$' + Math.round(mc.median_dd).toLocaleString(), color: '#ef4444' },
+                      ].map(function(row, i) {
+                        return (
+                          <div key={i} style={{ marginBottom: 7, borderBottom: i < 5 ? '1px solid var(--border)' : 'none', paddingBottom: 5 }}>
+                            <div style={{ fontSize: 9, color: muted }}>{row.label}</div>
+                            <div style={{ fontWeight: 700, color: row.color }}>{row.val}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="card" style={{ padding: '20px 24px', textAlign: 'center', opacity: 0.5 }}>
+                  <div style={{ fontSize: 22, marginBottom: 8 }}>🎲</div>
+                  <div style={{ fontSize: 12, color: muted }}>
+                    Accumule <strong>20+ trades</strong> pour débloquer la simulation Monte Carlo
+                    <br /><span style={{ fontSize: 10 }}>({n} / 20 trades actuellement)</span>
+                  </div>
+                  {/* Illustration courbes grisées */}
+                  <svg viewBox="0 0 300 60" style={{ width: '100%', maxWidth: 300, marginTop: 14, opacity: 0.3 }}>
+                    {[[10,50,30,40,20,55,15,45],[20,35,50,25,45,30,55,20],[15,40,20,50,35,45,25,50]].map(function(pts, pi) {
+                      var path = pts.map(function(y, i) { return (i===0?'M':'L') + (i/(pts.length-1)*290+5) + ',' + y; }).join(' ');
+                      return <path key={pi} d={path} fill="none" stroke="var(--muted)" strokeWidth={1.5} />;
+                    })}
+                  </svg>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </div>
     </div>
   );
 }
