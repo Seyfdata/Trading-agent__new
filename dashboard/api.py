@@ -1535,6 +1535,82 @@ def get_performance_advanced():
         return clean_for_json(dict(_empty_adv, error=str(e)))
 
 
+# ── Backtesting ───────────────────────────────────────────────────────────────
+
+@app.get("/api/backtest/{ticker}")
+def get_backtest_ticker(
+    ticker:   str,
+    strategy: str = "ALL",
+    period:   str = "3y",
+):
+    """
+    Backtest mécanique sur un ticker.
+    strategy : DISCOUNT_ZONE | SMA200_BOUNCE | VOLUME_MOMENTUM | ALL
+    period   : 1y | 2y | 3y
+    Attention : peut prendre 5-30s selon le ticker et la période.
+    """
+    try:
+        from analysis.backtester import backtest_strategy, backtest_all_strategies, STRATEGIES
+        ticker = ticker.upper().strip()
+
+        if strategy == "ALL":
+            result = backtest_all_strategies(ticker, period=period)
+        elif strategy in STRATEGIES:
+            result = backtest_strategy(ticker, strategy, period=period)
+            # Envelopper dans le même format que ALL pour le dashboard
+            result = {
+                "ticker": ticker, "period": period,
+                "results": {strategy: result},
+                "best_strategy": strategy if result["total_trades"] > 0 else None,
+                "summary": {
+                    strategy: {
+                        "total_trades":  result["total_trades"],
+                        "winrate":       result["winrate"],
+                        "profit_factor": result["profit_factor"],
+                        "total_pnl":     result["total_pnl"],
+                        "max_drawdown":  result["max_drawdown"],
+                        "avg_hold_days": result["avg_hold_days"],
+                    }
+                },
+            }
+        else:
+            return {"error": f"Stratégie inconnue : {strategy}. Valeurs : {STRATEGIES + ['ALL']}"}
+
+        return clean_for_json(result)
+    except Exception as e:
+        return {"error": str(e), "ticker": ticker}
+
+
+@app.get("/api/backtest/report")
+def get_backtest_report(period: str = "3y", top_n: int = 10):
+    """
+    Rapport complet : 3 stratégies × top N tickers (lent : 2-5 min).
+    Retourne la meilleure stratégie globale + résultats par ticker.
+    """
+    try:
+        from analysis.backtester import backtest_full_report
+        tickers = _top_tickers_from_db_or_watchlist(top_n)
+        result  = backtest_full_report(tickers, period=period)
+        return clean_for_json(result)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _top_tickers_from_db_or_watchlist(top_n: int) -> list:
+    """Retourne les top N tickers par score DB, fallback sur WATCHLIST[:top_n]."""
+    try:
+        import sqlite3 as _sq
+        with _sq.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT ticker FROM scores_history WHERE date=(SELECT MAX(date) FROM scores_history) ORDER BY total_score DESC LIMIT ?",
+                (top_n,),
+            ).fetchall()
+        tickers = [r[0] for r in rows]
+        return tickers if tickers else list(WATCHLIST)[:top_n]
+    except Exception:
+        return list(WATCHLIST)[:top_n]
+
+
 # ── Test pages ────────────────────────────────────────────────────────────────
 
 @app.get("/journal-test", response_class=HTMLResponse)

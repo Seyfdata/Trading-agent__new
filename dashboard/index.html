@@ -1764,6 +1764,205 @@ function PerformanceTab() {
           );
         })()}
       </div>
+
+      {/* ── Backtesting ── */}
+      {(function() {
+        var btTickerState  = useState('NVDA');    var btTicker = btTickerState[0];    var setBtTicker = btTickerState[1];
+        var btStratState   = useState('ALL');      var btStrat  = btStratState[0];     var setBtStrat  = btStratState[1];
+        var btPeriodState  = useState('3y');       var btPeriod = btPeriodState[0];    var setBtPeriod = btPeriodState[1];
+        var btLoadState    = useState(false);      var btLoad   = btLoadState[0];      var setBtLoad   = btLoadState[1];
+        var btDataState    = useState(null);       var btData   = btDataState[0];      var setBtData   = btDataState[1];
+        var btErrState     = useState(null);       var btErr    = btErrState[0];       var setBtErr    = btErrState[1];
+
+        var watchTickers = typeof _J_TICKERS !== 'undefined' ? _J_TICKERS : [];
+
+        function launchBacktest() {
+          if (btLoad) return;
+          setBtLoad(true); setBtErr(null); setBtData(null);
+          var url = '/api/backtest/' + encodeURIComponent(btTicker) + '?strategy=' + btStrat + '&period=' + btPeriod;
+          fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(d) { setBtData(d); setBtLoad(false); })
+            .catch(function(e) { setBtErr(String(e)); setBtLoad(false); });
+        }
+
+        var STRAT_COLORS = { DISCOUNT_ZONE: '#3b82f6', SMA200_BOUNCE: '#10b981', VOLUME_MOMENTUM: '#f59e0b' };
+        var STRAT_LABELS = { DISCOUNT_ZONE: 'Discount Zone', SMA200_BOUNCE: 'SMA200 Bounce', VOLUME_MOMENTUM: 'Vol Momentum' };
+
+        return (
+          <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+            <div className="stitle">BACKTESTING</div>
+
+            {/* Formulaire */}
+            <div className="card mb16" style={{ padding: '14px 16px' }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>TICKER</div>
+                  <select value={btTicker} onChange={function(e) { setBtTicker(e.target.value); }}
+                    style={{ background: 'var(--bg2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '6px 10px', fontSize: 12 }}>
+                    {watchTickers.map(function(t) { return <option key={t} value={t}>{t}</option>; })}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>STRATEGIE</div>
+                  <select value={btStrat} onChange={function(e) { setBtStrat(e.target.value); }}
+                    style={{ background: 'var(--bg2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '6px 10px', fontSize: 12 }}>
+                    <option value="ALL">Les 3 stratégies</option>
+                    <option value="DISCOUNT_ZONE">Discount Zone</option>
+                    <option value="SMA200_BOUNCE">SMA200 Bounce</option>
+                    <option value="VOLUME_MOMENTUM">Vol Momentum</option>
+                  </select>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>PERIODE</div>
+                  <select value={btPeriod} onChange={function(e) { setBtPeriod(e.target.value); }}
+                    style={{ background: 'var(--bg2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 4, padding: '6px 10px', fontSize: 12 }}>
+                    <option value="1y">1 an</option>
+                    <option value="2y">2 ans</option>
+                    <option value="3y">3 ans</option>
+                  </select>
+                </div>
+                <button className="btn btn-p" onClick={launchBacktest} disabled={btLoad} style={{ fontSize: 12, alignSelf: 'flex-end' }}>
+                  {btLoad ? <span><span className="spin-anim">⟳</span> Calcul en cours...</span> : '🔬 Lancer le backtest'}
+                </button>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 8 }}>
+                ⚠️ Le backtest peut prendre 10-30s selon le ticker et la période.
+              </div>
+            </div>
+
+            {/* Erreur */}
+            {btErr && <div style={{ color: 'var(--bear)', fontSize: 12, marginBottom: 12 }}>Erreur : {btErr}</div>}
+
+            {/* Placeholder */}
+            {!btData && !btLoad && !btErr && (
+              <div className="card" style={{ textAlign: 'center', padding: '32px 24px', opacity: 0.6 }}>
+                <div style={{ fontSize: 28, marginBottom: 10 }}>🔬</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Lance un backtest</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Découvre quelle stratégie a le meilleur edge historique sur tes tickers</div>
+              </div>
+            )}
+
+            {/* Résultats */}
+            {btData && !btData.error && (function() {
+              var summary = btData.summary || {};
+              var results = btData.results || {};
+              var best    = btData.best_strategy;
+              var strats  = Object.keys(summary);
+
+              // Tableau comparatif
+              var tableRows = strats.map(function(s) { return Object.assign({ strategy: s }, summary[s]); });
+              tableRows.sort(function(a, b) { return (b.total_pnl || 0) - (a.total_pnl || 0); });
+
+              // Equity curves pour le graphique
+              var allDates = [];
+              strats.forEach(function(s) {
+                var r = results[s];
+                if (r && r.equity_curve) r.equity_curve.forEach(function(pt) {
+                  if (allDates.indexOf(pt.date) < 0) allDates.push(pt.date);
+                });
+              });
+              allDates.sort();
+
+              // Construire les data points Recharts
+              var chartData = allDates.map(function(date) {
+                var pt = { date: date };
+                strats.forEach(function(s) {
+                  var r = results[s];
+                  if (!r || !r.equity_curve) return;
+                  var found = r.equity_curve.filter(function(p) { return p.date <= date; });
+                  pt[s] = found.length ? found[found.length - 1].pnl : 0;
+                });
+                return pt;
+              });
+              // Echantillonner pour limiter les points
+              var step = Math.max(1, Math.floor(chartData.length / 80));
+              chartData = chartData.filter(function(_, i) { return i % step === 0; });
+
+              return (
+                <div>
+                  {/* Tableau */}
+                  <div className="card mb16" style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ color: 'var(--muted)', fontSize: 10, letterSpacing: 1 }}>
+                          {['Stratégie', 'Trades', 'WR%', 'PF', 'PnL Total', 'Max DD', 'Moy Hold'].map(function(h, i) {
+                            return <th key={i} style={{ padding: '6px 10px', textAlign: i === 0 ? 'left' : 'right', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{h}</th>;
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tableRows.map(function(r, i) {
+                          var isBest = r.strategy === best;
+                          var sc = STRAT_COLORS[r.strategy] || 'var(--accent)';
+                          var pnlColor = r.total_pnl >= 0 ? '#10b981' : '#ef4444';
+                          var pf = r.profit_factor ? r.profit_factor + 'x' : '—';
+                          var pnl = r.total_pnl >= 0 ? '+$' + Math.round(r.total_pnl).toLocaleString() : '-$' + Math.round(Math.abs(r.total_pnl)).toLocaleString();
+                          return (
+                            <tr key={i} style={{ background: isBest ? 'rgba(16,185,129,.04)' : 'transparent', borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '8px 10px', color: sc, fontWeight: isBest ? 700 : 400 }}>
+                                {isBest && '🏆 '}{STRAT_LABELS[r.strategy] || r.strategy}
+                              </td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right' }}>{r.total_trades || 0}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: r.winrate >= 50 ? '#10b981' : '#ef4444' }}>{r.winrate || 0}%</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: r.profit_factor >= 1.5 ? '#10b981' : 'var(--muted)' }}>{pf}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: pnlColor }}>{pnl}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: '#ef4444' }}>{r.max_drawdown ? '-$' + Math.round(Math.abs(r.max_drawdown)).toLocaleString() : '—'}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--muted)' }}>{r.avg_hold_days || 0}j</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Equity curves */}
+                  {chartData.length > 1 && (
+                    <div className="card mb16" style={{ padding: '14px 16px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 12 }}>EQUITY CURVES — {btTicker} ({btPeriod})</div>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                          <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'var(--muted)' }} tickFormatter={function(v) { return v ? v.slice(2, 7) : ''; }} interval="preserveStartEnd" />
+                          <YAxis tick={{ fontSize: 9, fill: 'var(--muted)' }} tickFormatter={function(v) { return '$' + Math.round(v); }} width={54} />
+                          <Tooltip formatter={function(v, n) { return ['$' + Math.round(v), STRAT_LABELS[n] || n]; }} contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', fontSize: 11 }} />
+                          <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
+                          {strats.map(function(s) {
+                            return <Line key={s} type="monotone" dataKey={s} stroke={STRAT_COLORS[s] || '#888'} dot={false} strokeWidth={s === best ? 2.5 : 1.5} opacity={results[s] && results[s].total_trades > 0 ? 1 : 0.3} />;
+                          })}
+                        </LineChart>
+                      </ResponsiveContainer>
+                      <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 10 }}>
+                        {strats.map(function(s) {
+                          return <span key={s} style={{ color: STRAT_COLORS[s] }}>{'— ' + (STRAT_LABELS[s] || s)}{s === best ? ' 🏆' : ''}</span>;
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Verdict */}
+                  {best && summary[best] && (
+                    <div className="card" style={{ padding: '14px 16px', border: '1px solid rgba(16,185,129,.25)', background: 'rgba(16,185,129,.04)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                        🏆 Meilleure stratégie : <span style={{ color: '#10b981' }}>{STRAT_LABELS[best] || best}</span>
+                        {' — '}WR {summary[best].winrate}%, PF {summary[best].profit_factor || 'N/A'}
+                        {', '}
+                        <span style={{ color: summary[best].total_pnl >= 0 ? '#10b981' : '#ef4444' }}>
+                          {summary[best].total_pnl >= 0 ? '+' : '-'}${Math.round(Math.abs(summary[best].total_pnl)).toLocaleString()}
+                        </span>
+                        {' sur ' + btPeriod}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        💡 Recommandation : concentre-toi sur les setups <strong style={{ color: 'var(--text)' }}>{STRAT_LABELS[best]}</strong> en priorité sur {btTicker}.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
     </div>
   );
 }
