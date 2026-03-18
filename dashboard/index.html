@@ -1421,13 +1421,22 @@ function EdgeTable(props) {
 }
 
 function PerformanceTab() {
+  // ── TOUS les hooks en premier (règle React) ──────────────────────────────
   var ps = useState(null);  var perf = ps[0];     var setPerf = ps[1];
   var ls = useState(true);  var loading = ls[0];  var setLoading = ls[1];
   var es = useState(null);  var err = es[0];      var setErr = es[1];
 
-  var advState    = useState(null);  var adv = advState[0];        var setAdv = advState[1];
+  var advState     = useState(null);  var adv = advState[0];         var setAdv = advState[1];
   var advLoadState = useState(false); var advLoading = advLoadState[0]; var setAdvLoading = advLoadState[1];
   var advDoneState = useState(false); var advDone = advDoneState[0];    var setAdvDone = advDoneState[1];
+
+  // Hooks backtest (doivent être ici, PAS dans une IIFE ni sous un return conditionnel)
+  var btTickerState = useState('NVDA'); var btTicker = btTickerState[0]; var setBtTicker = btTickerState[1];
+  var btStratState  = useState('ALL');  var btStrat  = btStratState[0];  var setBtStrat  = btStratState[1];
+  var btPeriodState = useState('3y');   var btPeriod = btPeriodState[0]; var setBtPeriod = btPeriodState[1];
+  var btLoadState   = useState(false);  var btLoad   = btLoadState[0];   var setBtLoad   = btLoadState[1];
+  var btDataState   = useState(null);   var btData   = btDataState[0];   var setBtData   = btDataState[1];
+  var btErrState    = useState(null);   var btErr    = btErrState[0];    var setBtErr    = btErrState[1];
 
   useEffect(function() {
     setLoading(true);
@@ -1437,6 +1446,7 @@ function PerformanceTab() {
       .catch(function(e) { setErr(String(e)); setLoading(false); });
   }, []);
 
+  // ── Fonctions (après les hooks) ───────────────────────────────────────────
   function loadAdvanced() {
     if (advLoading) return;
     setAdvLoading(true);
@@ -1446,6 +1456,21 @@ function PerformanceTab() {
       .catch(function(e) { setAdvLoading(false); });
   }
 
+  function launchBacktest() {
+    if (btLoad) return;
+    setBtLoad(true); setBtErr(null); setBtData(null);
+    var url = '/api/backtest/' + encodeURIComponent(btTicker) + '?strategy=' + btStrat + '&period=' + btPeriod;
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setBtData(d); setBtLoad(false); })
+      .catch(function(e) { setBtErr(String(e)); setBtLoad(false); });
+  }
+
+  var STRAT_COLORS = { DISCOUNT_ZONE: '#3b82f6', SMA200_BOUNCE: '#10b981', VOLUME_MOMENTUM: '#f59e0b' };
+  var STRAT_LABELS = { DISCOUNT_ZONE: 'Discount Zone', SMA200_BOUNCE: 'SMA200 Bounce', VOLUME_MOMENTUM: 'Vol Momentum' };
+  var watchTickers = typeof _J_TICKERS !== 'undefined' ? _J_TICKERS : [];
+
+  // ── Returns conditionnels APRÈS tous les hooks ────────────────────────────
   if (loading) return <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>Chargement des statistiques...</div>;
   if (err)     return <div className="card" style={{ color: 'var(--bear)', padding: 20 }}>Erreur : {err}</div>;
   if (!perf)   return null;
@@ -1766,31 +1791,7 @@ function PerformanceTab() {
       </div>
 
       {/* ── Backtesting ── */}
-      {(function() {
-        var btTickerState  = useState('NVDA');    var btTicker = btTickerState[0];    var setBtTicker = btTickerState[1];
-        var btStratState   = useState('ALL');      var btStrat  = btStratState[0];     var setBtStrat  = btStratState[1];
-        var btPeriodState  = useState('3y');       var btPeriod = btPeriodState[0];    var setBtPeriod = btPeriodState[1];
-        var btLoadState    = useState(false);      var btLoad   = btLoadState[0];      var setBtLoad   = btLoadState[1];
-        var btDataState    = useState(null);       var btData   = btDataState[0];      var setBtData   = btDataState[1];
-        var btErrState     = useState(null);       var btErr    = btErrState[0];       var setBtErr    = btErrState[1];
-
-        var watchTickers = typeof _J_TICKERS !== 'undefined' ? _J_TICKERS : [];
-
-        function launchBacktest() {
-          if (btLoad) return;
-          setBtLoad(true); setBtErr(null); setBtData(null);
-          var url = '/api/backtest/' + encodeURIComponent(btTicker) + '?strategy=' + btStrat + '&period=' + btPeriod;
-          fetch(url)
-            .then(function(r) { return r.json(); })
-            .then(function(d) { setBtData(d); setBtLoad(false); })
-            .catch(function(e) { setBtErr(String(e)); setBtLoad(false); });
-        }
-
-        var STRAT_COLORS = { DISCOUNT_ZONE: '#3b82f6', SMA200_BOUNCE: '#10b981', VOLUME_MOMENTUM: '#f59e0b' };
-        var STRAT_LABELS = { DISCOUNT_ZONE: 'Discount Zone', SMA200_BOUNCE: 'SMA200 Bounce', VOLUME_MOMENTUM: 'Vol Momentum' };
-
-        return (
-          <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
+      <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
             <div className="stitle">BACKTESTING</div>
 
             {/* Formulaire */}
@@ -1961,8 +1962,7 @@ function PerformanceTab() {
               );
             })()}
           </div>
-        );
-      })()}
+      </div>
     </div>
   );
 }
