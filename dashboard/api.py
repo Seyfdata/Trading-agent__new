@@ -1046,14 +1046,30 @@ def get_alerts_news():
 
 # ── SMC Analysis ─────────────────────────────────────────────────────────────
 
+@app.get("/api/options/{ticker}")
+def get_options(ticker: str):
+    """Analyse du flux options (PCR, max pain, unusual activity, smart money) pour un ticker."""
+    try:
+        from analysis.options_flow import get_options_sentiment
+        result = get_options_sentiment(ticker.upper().strip())
+        return clean_for_json(result)
+    except Exception as e:
+        return {"error": str(e), "ticker": ticker}
+
+
 @app.get("/api/analysis/{ticker}")
 def get_smc_analysis(ticker: str):
     """Analyse SMC complète (structure, OBs, FVGs, liquidité, setup) pour un ticker."""
     try:
         from analysis.smc_analyzer import analyze_ticker, format_smc_report
+        from analysis.options_flow import get_options_sentiment
         ticker = ticker.upper().strip()
         analysis = analyze_ticker(ticker)
         analysis["report"] = format_smc_report(analysis)
+        try:
+            analysis["options_data"] = get_options_sentiment(ticker)
+        except Exception:
+            analysis["options_data"] = {}
         return clean_for_json(analysis)
     except Exception as e:
         return {"error": str(e), "ticker": ticker, "mode": "DEMO"}

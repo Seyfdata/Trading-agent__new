@@ -1824,7 +1824,7 @@ function SmcTab(props) {
         if (!ud) return null;
         var gc = _gradeColor(ud.grade);
         var isAPlus = ud.grade === 'A+';
-        var bdLabels = { discount_zone: 'Discount Zone', sma200_bounce: 'SMA200 Bounce', volume_momentum: 'Volume Momentum', htf_bull: 'HTF Bull', in_discount_or_ote: 'Discount/OTE', fresh_ob_nearby: 'Bull OB frais', fvg_nearby: 'FVG actif', ssl_swept: 'SSL balayé', confluences_strong: 'Confluences ≥4' };
+        var bdLabels = { discount_zone: 'Discount Zone', sma200_bounce: 'SMA200 Bounce', volume_momentum: 'Volume Momentum', htf_bull: 'HTF Bull', in_discount_or_ote: 'Discount/OTE', fresh_ob_nearby: 'Bull OB frais', fvg_nearby: 'FVG actif', ssl_swept: 'SSL balayé', confluences_strong: 'Confluences ≥4', options_bullish: 'Options BULLISH' };
         var bdEntries = Object.keys(ud.scoring_breakdown || {}).map(function(k) { return { k: k, v: (ud.scoring_breakdown || {})[k] }; });
         return (
           <div className="mb16">
@@ -1863,6 +1863,59 @@ function SmcTab(props) {
               {ud.reasoning && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginBottom: 12, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>{ud.reasoning}</div>
               )}
+              {/* Options Flow */}
+              {(function() {
+                var od = ud.options_data;
+                if (!od || od.error || !od.overall_direction) return null;
+                var dirColor = od.overall_direction === 'BULLISH' ? '#10b981' : od.overall_direction === 'BEARISH' ? '#ef4444' : 'var(--muted)';
+                var pcrVal = od.pcr && od.pcr.value != null ? Number(od.pcr.value).toFixed(2) : null;
+                var pcrDir = od.pcr && od.pcr.direction;
+                var pcrColor = pcrDir === 'BULLISH' ? '#10b981' : pcrDir === 'BEARISH' ? '#ef4444' : 'var(--muted)';
+                var pcrFill = pcrVal ? Math.min(100, Math.round(parseFloat(pcrVal) / 2 * 100)) : 50;
+                var mp = od.max_pain;
+                var smDir = od.smart_money && od.smart_money.direction;
+                var unusual = od.unusual_activity || [];
+                return (
+                  <div style={{ marginBottom: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>📊 OPTIONS FLOW</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: dirColor, background: dirColor + '18', border: '1px solid ' + dirColor + '40' }}>{od.overall_direction} ({od.conviction})</span>
+                      {smDir && <span style={{ fontSize: 10, color: smDir === 'BULLISH' ? '#10b981' : smDir === 'BEARISH' ? '#ef4444' : 'var(--muted)' }}>Smart Money: {smDir}</span>}
+                    </div>
+                    {pcrVal && (
+                      <div style={{ marginBottom: 8 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>
+                          <span>Put/Call Ratio</span>
+                          <span style={{ color: pcrColor, fontWeight: 700 }}>{pcrVal} — {pcrDir}</span>
+                        </div>
+                        <div style={{ height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: pcrFill + '%', background: pcrColor, borderRadius: 3, transition: 'width .3s' }} />
+                        </div>
+                      </div>
+                    )}
+                    {mp && mp.level != null && (
+                      <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>
+                        Max Pain: <span style={{ fontWeight: 700, color: mp.bias === 'BULLISH' ? '#10b981' : mp.bias === 'BEARISH' ? '#ef4444' : 'var(--text)' }}>${Number(mp.level).toFixed(0)}</span>
+                        <span style={{ marginLeft: 4 }}>({mp.vs_price} prix actuel → {mp.bias})</span>
+                      </div>
+                    )}
+                    {unusual.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Activités inhabituelles :</div>
+                        {unusual.slice(0, 3).map(function(u, i) {
+                          var uc = u.type === 'CALL' ? '#10b981' : '#ef4444';
+                          return (
+                            <div key={i} style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>
+                              <span style={{ fontWeight: 700, color: uc }}>{u.type === 'CALL' ? '🟢' : '🔴'} {u.type}</span>
+                              {' '}strike ${u.strike} — Vol {Number(u.volume).toLocaleString()} / OI {Number(u.openInterest).toLocaleString()} <span style={{ color: uc }}>({u.ratio}×)</span> {u.moneyness} — {u.expiry}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-p" onClick={handleAddTradeUnified}>📝 Enregistrer ce trade</button>
                 <a href={'https://www.tradingview.com/chart/?symbol=' + selectedTicker} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}><button className="btn">📈 TradingView</button></a>
@@ -2076,6 +2129,60 @@ function SmcTab(props) {
                     })}
                   </div>
                 </div>
+
+                {/* Options Flow (depuis /api/analysis) */}
+                {(function() {
+                  var od = analysis && analysis.options_data;
+                  if (!od || od.error || !od.overall_direction) return null;
+                  var dirColor = od.overall_direction === 'BULLISH' ? '#10b981' : od.overall_direction === 'BEARISH' ? '#ef4444' : 'var(--muted)';
+                  var pcrVal = od.pcr && od.pcr.value != null ? Number(od.pcr.value).toFixed(2) : null;
+                  var pcrDir = od.pcr && od.pcr.direction;
+                  var pcrColor = pcrDir === 'BULLISH' ? '#10b981' : pcrDir === 'BEARISH' ? '#ef4444' : 'var(--muted)';
+                  var pcrFill = pcrVal ? Math.min(100, Math.round(parseFloat(pcrVal) / 2 * 100)) : 50;
+                  var mp = od.max_pain;
+                  var smDir = od.smart_money && od.smart_money.direction;
+                  var unusual = od.unusual_activity || [];
+                  return (
+                    <div style={{ marginBottom: 12, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>📊 OPTIONS FLOW</div>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, color: dirColor, background: dirColor + '18', border: '1px solid ' + dirColor + '40' }}>{od.overall_direction} ({od.conviction})</span>
+                        {smDir && <span style={{ fontSize: 10, color: smDir === 'BULLISH' ? '#10b981' : smDir === 'BEARISH' ? '#ef4444' : 'var(--muted)' }}>Smart Money: {smDir}</span>}
+                      </div>
+                      {pcrVal && (
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>
+                            <span>Put/Call Ratio</span>
+                            <span style={{ color: pcrColor, fontWeight: 700 }}>{pcrVal} — {pcrDir}</span>
+                          </div>
+                          <div style={{ height: 5, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: pcrFill + '%', background: pcrColor, borderRadius: 3, transition: 'width .3s' }} />
+                          </div>
+                        </div>
+                      )}
+                      {mp && mp.level != null && (
+                        <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>
+                          Max Pain: <span style={{ fontWeight: 700, color: mp.bias === 'BULLISH' ? '#10b981' : mp.bias === 'BEARISH' ? '#ef4444' : 'var(--text)' }}>${Number(mp.level).toFixed(0)}</span>
+                          <span style={{ marginLeft: 4 }}>({mp.vs_price} prix actuel → {mp.bias})</span>
+                        </div>
+                      )}
+                      {unusual.length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Activités inhabituelles :</div>
+                          {unusual.slice(0, 3).map(function(u, i) {
+                            var uc = u.type === 'CALL' ? '#10b981' : '#ef4444';
+                            return (
+                              <div key={i} style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 2 }}>
+                                <span style={{ fontWeight: 700, color: uc }}>{u.type === 'CALL' ? '🟢' : '🔴'} {u.type}</span>
+                                {' '}strike ${u.strike} — Vol {Number(u.volume).toLocaleString()} / OI {Number(u.openInterest).toLocaleString()} <span style={{ color: uc }}>({u.ratio}×)</span> {u.moneyness} — {u.expiry}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Raisonnement */}
                 {su.reasoning && (

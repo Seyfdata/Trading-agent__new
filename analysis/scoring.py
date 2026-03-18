@@ -193,6 +193,43 @@ def _news_score(news_data: dict) -> tuple[int, str]:
     return min(score, 25), detail
 
 
+# ── Score Options (–3 à +3) ─────────────────────────────────────────────────
+
+def _options_score(options_data: dict) -> tuple[int, str]:
+    """
+    Bonus/malus basé sur le sentiment options.
+
+    options_data doit contenir :
+        - overall_direction  ("BULLISH" | "NEUTRAL" | "BEARISH")
+        - conviction         ("HIGH" | "MEDIUM" | "LOW")
+
+    Règles :
+        sentiment_score > +0.3 → +3
+        sentiment_score < −0.3 → −3
+        sinon → 0
+    """
+    if not options_data:
+        return 0, "no_data"
+
+    direction  = options_data.get("overall_direction", "NEUTRAL")
+    conviction = options_data.get("conviction", "LOW")
+
+    conviction_factor = {"HIGH": 1.0, "MEDIUM": 0.67, "LOW": 0.33}.get(conviction, 0.33)
+
+    if direction == "BULLISH":
+        sentiment_score = conviction_factor
+    elif direction == "BEARISH":
+        sentiment_score = -conviction_factor
+    else:
+        sentiment_score = 0.0
+
+    if sentiment_score > 0.3:
+        return 3, f"options_bullish_{conviction.lower()}"
+    if sentiment_score < -0.3:
+        return -3, f"options_bearish_{conviction.lower()}"
+    return 0, "options_neutral"
+
+
 # ── Fonction principale ─────────────────────────────────────────────────────
 
 def score_ticker(
@@ -202,6 +239,7 @@ def score_ticker(
     news_data: dict,
     trend_data: dict = None,
     in_watchlist: bool = True,
+    options_data: dict = None,
 ) -> dict:
     """
     Calcule le score composite (0-100) pour un ticker.
@@ -214,6 +252,7 @@ def score_ticker(
     news_data    : dict  — données news (ticker_matches, keyword_matches)
     trend_data   : dict  — tendance Reddit 5j optionnelle {"trend": "RISING"|…}
     in_watchlist : bool  — ticker appartient à la watchlist perso (défaut True)
+    options_data : dict  — sentiment options (overall_direction, conviction) — optionnel
 
     Retourne
     --------
@@ -227,8 +266,9 @@ def score_ticker(
     cross, cross_detail = _cross_validation_score(
         reddit_data, news_data, trend_data, in_watchlist
     )
+    options, options_detail = _options_score(options_data or {})
 
-    total = max(0, min(100, sma200 + volume + reddit + news + cross))
+    total = max(0, min(100, sma200 + volume + reddit + news + cross + options))
 
     return {
         "ticker": ticker,
@@ -238,12 +278,15 @@ def score_ticker(
         "reddit_score": reddit,
         "news_score": news,
         "cross_validation_score": cross,
+        "options_score": options,
+        "options_sentiment": options_data or {},
         "components": {
             "sma200_detail": sma200_detail,
             "volume_detail": volume_detail,
             "reddit_detail": reddit_detail,
             "news_detail": news_detail,
             "cross_validation_detail": cross_detail,
+            "options_detail": options_detail,
         },
     }
 

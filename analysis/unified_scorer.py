@@ -179,6 +179,8 @@ def _build_reasoning(
         positives.append("SSL récemment balayé (liquidité prise)")
     if breakdown["confluences_strong"]:
         positives.append("confluences SMC solides (≥4)")
+    if breakdown.get("options_bullish"):
+        positives.append("options flow BULLISH")
 
     if not breakdown["htf_bull"]:
         negatives.append("biais HTF non haussier")
@@ -281,6 +283,19 @@ def unified_analysis(ticker: str) -> dict:
     if s_ssl_swept:          score += 1.0
     if s_confluences_strong: score += 1.0
 
+    # options sentiment (+0.5 pt si BULLISH)
+    options_data: dict = {}
+    s_options_bullish = False
+    try:
+        from analysis.options_flow import get_options_sentiment
+        options_data = get_options_sentiment(ticker)
+        s_options_bullish = options_data.get("overall_direction") == "BULLISH"
+    except Exception:
+        pass
+
+    if s_options_bullish:
+        score += 0.5
+
     score = round(min(score, 10.0), 1)
     grade = _grade(score)
 
@@ -294,6 +309,7 @@ def unified_analysis(ticker: str) -> dict:
         "fvg_nearby":         s_fvg,
         "ssl_swept":          s_ssl_swept,
         "confluences_strong": s_confluences_strong,
+        "options_bullish":    s_options_bullish,
     }
 
     # ── 5. Entry / Stop / Target (priorité : setup SMC, sinon setup_detector) ─
@@ -364,6 +380,7 @@ def unified_analysis(ticker: str) -> dict:
         "rr_ratio":               rr,
         "reasoning":              reasoning,
         "error":                  smc.get("error"),
+        "options_data":           options_data,
     }
 
 
