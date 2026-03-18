@@ -679,6 +679,7 @@ function OverviewTab(props) {
   var setupsData       = props.setupsData;
   var onGoToSetups     = props.onGoToSetups     || function() {};
   var posMonitor       = props.posMonitor        || { positions: [], count: 0 };
+  var tradesProgress   = props.tradesProgress    || { total_closed: 0, target: 50, progress_pct: 0, next_milestone: 10, milestone_message: '' };
   var scanResults      = props.scanResults       || [];
   var onGoToSmc        = props.onGoToSmc         || function() {};
   var onGoToReddit     = props.onGoToReddit      || function() {};
@@ -767,6 +768,41 @@ function OverviewTab(props) {
           })}
         </div>
       )}
+
+      {/* ── Compteur 50 trades ── */}
+      {(function() {
+        var tc  = tradesProgress.total_closed;
+        var pct = tradesProgress.progress_pct;
+        var barColor = tc >= 50 ? '#10b981' : tc >= 20 ? '#3b82f6' : tc >= 10 ? '#f59e0b' : '#ef4444';
+        var STEPS = [
+          { n: 10, label: 'Sharpe' },
+          { n: 20, label: 'Monte Carlo' },
+          { n: 50, label: 'Stats fiables' },
+        ];
+        return (
+          <div className="card mb16" style={{ padding: '10px 16px' }}>
+            <div className="rowb mb6">
+              <span className="stitle" style={{ marginBottom: 0 }}>🎯 PROGRESSION</span>
+              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{tc}/{tradesProgress.target} trades clôturés</span>
+            </div>
+            <div style={{ background: 'rgba(30,41,59,.6)', borderRadius: 4, height: 6, marginBottom: 8, overflow: 'hidden' }}>
+              <div style={{ width: pct + '%', height: '100%', background: barColor, borderRadius: 4, transition: 'width .4s ease' }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{tradesProgress.milestone_message}</div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              {STEPS.map(function(s) {
+                var done = tc >= s.n;
+                return (
+                  <div key={s.n} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: done ? '#10b981' : 'var(--muted)' }}>
+                    <span>{done ? '✅' : '🔲'}</span>
+                    <span>{s.n} ({s.label})</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {discItems.length > 0 && (
         <div className="card mb16" style={{ padding: '10px 16px' }}>
@@ -1484,8 +1520,25 @@ function PerformanceTab() {
   var ddColor  = '#ef4444';
   var exColor  = isEmpty ? 'var(--muted)' : (perf.expectancy >= 0 ? '#10b981' : '#ef4444');
 
+  var _tc  = perf.total_trades || 0;
+  var _pct = Math.min(Math.round(_tc / 50 * 100), 100);
+  var _barC = _tc >= 50 ? '#10b981' : _tc >= 20 ? '#3b82f6' : _tc >= 10 ? '#f59e0b' : '#ef4444';
+
   return (
     <div>
+      {/* ── Bannière progression 50 trades ── */}
+      <div className="card mb16" style={{ padding: '10px 16px', borderLeft: '3px solid ' + (_tc >= 50 ? '#10b981' : '#f59e0b') }}>
+        <div className="rowb mb6">
+          <span style={{ fontSize: 12, fontWeight: 700, color: _tc >= 50 ? '#10b981' : '#f59e0b' }}>
+            {_tc >= 50 ? '✅ 50+ trades — métriques fiables' : '⚠️ ' + _tc + '/50 trades — les métriques ne sont pas encore significatives'}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>{_pct}%</span>
+        </div>
+        <div style={{ background: 'rgba(30,41,59,.6)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
+          <div style={{ width: _pct + '%', height: '100%', background: _barC, borderRadius: 4, transition: 'width .4s ease' }} />
+        </div>
+      </div>
+
       {isEmpty && (
         <div className="card mb16" style={{ textAlign: 'center', padding: '32px 24px' }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>📊</div>
@@ -4259,6 +4312,10 @@ function TradingDashboard() {
   var smcForceTicker      = smcForceTickerState[0];
   var setSmcForceTicker   = smcForceTickerState[1];
 
+  var tpState        = useState({ total_closed: 0, target: 50, progress_pct: 0, next_milestone: 10, milestone_message: '📊 Encore 10 trades pour débloquer Sharpe/Sortino' });
+  var tradesProgress = tpState[0];
+  var setTradesProgress = tpState[1];
+
   useEffect(function() {
     // Charger chaque endpoint indépendamment — mise à jour dès réception, timeout 15s
     var eps = ['market', 'tickers', 'reddit', 'news', 'macro', 'history'];
@@ -4278,6 +4335,20 @@ function TradingDashboard() {
         })
         .catch(function() { clearTimeout(tid); /* garde données démo */ });
     });
+
+    // Progression trades (une fois au chargement)
+    fetch('/api/trades?limit=1')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.total_closed != null) setTradesProgress({
+          total_closed:      d.total_closed,
+          target:            d.target            || 50,
+          progress_pct:      d.progress_pct      || 0,
+          next_milestone:    d.next_milestone,
+          milestone_message: d.milestone_message || '',
+        });
+      })
+      .catch(function() {});
 
     // Horloge
     var clk = setInterval(function() { setTime(new Date()); }, 1000);
@@ -4587,7 +4658,7 @@ function TradingDashboard() {
       </nav>
 
       <main className="content">
-        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} />}
+        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} tradesProgress={tradesProgress} />}
         {tab === 'watchlist' && <WatchlistTab data={data} />}
         {tab === 'reddit'    && <RedditTab data={data} discoveries={discoveries} discLoading={discLoading} onLoadDisc={loadDiscoveries} onAnalyzeTk={analyzeDiscovery} onAddTemp={addTempTicker} tempWatchlist={tempWatchlist} />}
         {tab === 'news'      && <NewsTab      data={data} />}
