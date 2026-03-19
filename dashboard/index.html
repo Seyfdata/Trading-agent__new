@@ -3489,17 +3489,18 @@ function GuideTab() {
   }
 
   var TOC_ITEMS = [
-    { id: 'g1',  label: '🚀 Installation et lancement' },
-    { id: 'g2',  label: '☀️ Routine morning (pré-marché)' },
-    { id: 'g3',  label: '🔴 Pendant la killzone' },
-    { id: 'g4',  label: '📝 Enregistrer et suivre un trade' },
-    { id: 'g5',  label: '🧠 Analyser un ticker' },
-    { id: 'g6',  label: '📊 Lire les métriques de performance' },
-    { id: 'g7',  label: '⚙️ Configuration' },
-    { id: 'g8',  label: '🎯 Comprendre les scores et alertes' },
-    { id: 'g9',  label: '📅 Routine quotidienne détaillée' },
-    { id: 'g10', label: '📖 Glossaire SMC & Trading' },
-    { id: 'g11', label: '🌍 English Quick Guide' },
+    { id: 'g1',     label: '🚀 Installation et lancement' },
+    { id: 'g-coach',label: '🤝 L\'onglet Coach — Ton copilote' },
+    { id: 'g2',     label: '☀️ Routine morning (pré-marché)' },
+    { id: 'g3',     label: '🔴 Pendant la killzone' },
+    { id: 'g4',     label: '📝 Enregistrer et suivre un trade' },
+    { id: 'g5',     label: '🧠 Analyser un ticker' },
+    { id: 'g6',     label: '📊 Lire les métriques de performance' },
+    { id: 'g7',     label: '⚙️ Configuration' },
+    { id: 'g8',     label: '🎯 Comprendre les scores et alertes' },
+    { id: 'g9',     label: '📅 Routine quotidienne détaillée' },
+    { id: 'g10',    label: '📖 Glossaire SMC & Trading' },
+    { id: 'g11',    label: '🌍 English Quick Guide' },
   ];
 
   return (
@@ -3547,10 +3548,45 @@ copy .env.example .env           # puis éditer avec tes clés API`}</pre>
           <div style={sText}>• <strong style={{ color: 'var(--text)' }}>Raccourci bureau</strong> : créer un fichier <code style={{ color: '#fbbf24', background: 'rgba(251,191,36,.08)', padding: '1px 4px', borderRadius: 3 }}>launch_dashboard.bat</code> contenant la commande</div>
           <div style={Object.assign({}, sText, s0)}>• <strong style={{ color: 'var(--text)' }}>Mise à jour</strong> : <code style={{ color: '#fbbf24', background: 'rgba(251,191,36,.08)', padding: '1px 4px', borderRadius: 3 }}>git pull {'&&'} pip install -r requirements.txt</code></div>
         </div>
+        <div style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.25)', borderLeft: '3px solid #10b981', borderRadius: 6, padding: '12px 16px', marginTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#10b981', marginBottom: 6 }}>💡 Par où commencer ?</div>
+          <div style={Object.assign({}, sText, s0)}>Quand tu ouvres le dashboard, commence <strong style={{ color: 'var(--text)' }}>TOUJOURS par l'onglet 🤝 Coach</strong>. Il te guide étape par étape pour toute la session de trading, sans que tu aies besoin de maîtriser les autres onglets.</div>
+        </div>
         <BackTop />
       </div>
 
-      {/* ── Section 2 : Routine morning ── */}
+      {/* ── Section 2 : Coach ── */}
+      <div id="g-coach" style={sCard}>
+        <STitle icon="🤝" title="L'onglet Coach — Ton copilote" />
+        <p style={sText}>L'onglet Coach te prend par la main pour chaque session de trading. C'est <strong style={{ color: 'var(--text)' }}>le seul onglet dont tu as besoin pour commencer</strong>.</p>
+        <div style={{ display: 'grid', gap: 10, marginBottom: 20 }}>
+          {[
+            { icon: '☀️', title: 'Il te dit si c\'est une bonne journée pour trader', desc: 'Contexte marché, événements macro, verdict GO / PRUDENCE / NO TRADE — en un seul bloc clair.' },
+            { icon: '🎯', title: 'Il scanne les meilleures opportunités', desc: 'Analyse les 22 tickers et te présente les setups intéressants en langage simple, sans jargon.' },
+            { icon: '📈', title: 'Il te guide pour vérifier sur TradingView', desc: 'Une checklist de 5 points à cocher sur le graphique. Tu ne continues que quand tout est vert.' },
+            { icon: '💰', title: 'Il te dit exactement quoi faire sur IBKR', desc: 'Instructions pas-à-pas : ticker, type d\'ordre, quantité, bracket order stop/target.' },
+            { icon: '📝', title: 'Il enregistre ton trade automatiquement', desc: 'Le formulaire du Journal est pré-rempli avec tous les niveaux. Un clic pour enregistrer.' },
+          ].map(function(item, i) {
+            return (
+              <div key={i} style={{ display: 'flex', gap: 14, padding: '12px 16px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, alignItems: 'flex-start' }}>
+                <span style={{ fontSize: 22, flexShrink: 0 }}>{item.icon}</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{item.title}</div>
+                  <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.6 }}>{item.desc}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={Object.assign({}, sEx, { borderLeftColor: '#10b981', background: 'rgba(16,185,129,.04)' })}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#10b981', marginBottom: 8, letterSpacing: 1 }}>💡 À RETENIR</div>
+          <div style={sText}>Tu n'as pas besoin de comprendre tous les autres onglets pour commencer. Le Coach utilise toutes les données du dashboard et te donne le résumé.</div>
+          <div style={Object.assign({}, sText, s0)}>Les autres onglets (Watchlist, Reddit, Analyse SMC, Performance...) sont là pour quand tu voudras aller plus en profondeur. <strong style={{ color: 'var(--text)' }}>Pas besoin de les maîtriser dès le premier jour.</strong></div>
+        </div>
+        <BackTop />
+      </div>
+
+      {/* ── Section 3 : Routine morning (id=g2 conservé) ── */}
       <div id="g2" style={sCard}>
         <STitle icon="☀️" title="Routine morning (pré-marché)" />
         <p style={sText}>Workflow recommandé chaque matin <strong style={{ color: 'var(--text)' }}>avant 14h30</strong> pour préparer ta session de trading.</p>
@@ -4144,9 +4180,13 @@ Refresh:  click 🔄 to update all data (takes ~15s)`}</pre>
             );
           })}
         </div>
+        <div style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.25)', borderLeft: '3px solid #10b981', borderRadius: 6, padding: '10px 14px', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#10b981', marginBottom: 4 }}>💡 Where to start?</div>
+          <div style={{ fontSize: 12, color: '#94a3b8' }}>Start with the <strong style={{ color: 'var(--text)' }}>🤝 Coach tab</strong> — it guides you step by step through each trading session. You don't need to master any other tab to begin.</div>
+        </div>
         <div style={{ fontSize: 11, color: 'var(--muted)', letterSpacing: 1, marginBottom: 8 }}>DAILY ROUTINE</div>
         {[
-          { time: 'Pre-market  12:30 CET', action: 'Launch dashboard → refresh → check context → scan SMC top 5 setups', color: '#3b82f6' },
+          { time: 'Pre-market  12:30 CET', action: 'Open Coach tab → refresh → check verdict → scan opportunities', color: '#3b82f6' },
           { time: 'Kill Zone   14:30–16:30', action: 'Monitor alerts → trade Grade A/B setups only → log in Journal', color: '#ef4444' },
           { time: 'Post-market 16:30+ CET', action: 'Close trades → review performance tab → weekly: run advanced metrics', color: '#10b981' },
         ].map(function(r, i) {
