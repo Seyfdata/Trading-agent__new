@@ -4193,6 +4193,7 @@ function CoachTab(props) {
   var refreshLoading  = props.refreshLoading  || false;
   var lastUpd         = props.lastUpd;
   var onGoToJournal   = props.onGoToJournal   || function(){};
+  var tradesProgress  = props.tradesProgress  || { total_closed: 0, target: 50, progress_pct: 0, next_milestone: 10, milestone_message: '' };
 
   var CAPITAL  = 10000;
   var RISK_PCT = 1.0;
@@ -4213,6 +4214,10 @@ function CoachTab(props) {
   var rulesOpenState   = useState(false);
   var rulesOpen        = rulesOpenState[0];
   var setRulesOpen     = rulesOpenState[1];
+
+  var tvCheckState     = useState([false, false, false, false, false]);
+  var tvChecks         = tvCheckState[0];
+  var setTvChecks      = tvCheckState[1];
 
   // ── Derived data ──────────────────────────────────────────────────────────
   var market       = data.market || {};
@@ -4245,32 +4250,114 @@ function CoachTab(props) {
     return { shares: shares, totalCost: Math.round(totalCost), gainAmt: gainAmt ? Math.round(gainAmt) : null, lossAmt: Math.round(lossAmt), riskPct: (lossAmt / CAPITAL * 100).toFixed(2) };
   }
 
-  // Build "pourquoi" list for a setup
+  // CET time helper
+  function getCETMinutes() {
+    try {
+      var d = new Date();
+      var fmt = new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false });
+      var parts = fmt.formatToParts(d);
+      var h = parseInt(parts.find(function(p) { return p.type === 'hour'; }).value, 10);
+      var m = parseInt(parts.find(function(p) { return p.type === 'minute'; }).value, 10);
+      return h * 60 + m;
+    } catch(e) { return new Date().getHours() * 60 + new Date().getMinutes(); }
+  }
+
+  // Score dots display (amélioration 3)
+  function scoreDisplay(score) {
+    var n = Math.round(score || 0);
+    var dots = [];
+    for (var i = 1; i <= 10; i++) {
+      dots.push(React.createElement('span', { key: i, style: { color: i <= n ? '#10b981' : '#1e293b', fontSize: 16, margin: '0 1px' } }, i <= n ? '●' : '●' ));
+    }
+    var clr  = n >= 8 ? '#10b981' : n >= 6 ? '#3b82f6' : n >= 4 ? '#f59e0b' : '#ef4444';
+    var txt  = n >= 8 ? '🌟 Excellent setup — fonce !'
+             : n >= 6 ? '👍 Bon setup — tu peux y aller'
+             : n >= 4 ? '🤔 Setup moyen — réduis le risque de moitié'
+             : n >= 2 ? '👎 Setup faible — mieux vaut passer'
+             :          '🚫 Pas de setup — patience';
+    return { dots: dots, clr: clr, txt: txt, n: n };
+  }
+
+  // Human-friendly reasons (amélioration 2)
   function buildReasons(setup) {
     var reasons = [];
-    var smc = setup.smc_analysis || {};
-    if (smc.zone === 'DISCOUNT')  reasons.push('Le prix est en zone de soldes (discount)');
-    if (smc.bias === 'BULL')      reasons.push('La tendance long terme est haussière (SMA200)');
+    var smc  = setup.smc_analysis || {};
+    var bd   = setup.scoring_breakdown || {};
     var opts = setup.options_data || {};
-    if (opts.direction === 'BULLISH') reasons.push('Les gros investisseurs achètent (options flow)');
     var sigs = setup.setup_detector_signals || [];
-    if (sigs.indexOf('DISCOUNT_ZONE') >= 0 && smc.zone !== 'DISCOUNT') reasons.push('Zone de discount détectée (setup_detector)');
-    if (sigs.indexOf('SMA200_BOUNCE') >= 0) reasons.push('Rebond sur la SMA200 détecté');
-    if (sigs.indexOf('VOLUME_MOMENTUM') >= 0) reasons.push('Volume en forte hausse (momentum)');
-    var bd = setup.scoring_breakdown || {};
-    if (bd.ob_present > 0) reasons.push('Order Block institutionnel présent');
-    if (bd.fvg_present > 0) reasons.push('Fair Value Gap (zone de remplissage) identifié');
-    if (reasons.length === 0) reasons.push('Score de confluence élevé (' + (setup.unified_score || 0).toFixed(1) + '/10)');
+
+    if (smc.bias === 'BULL')              reasons.push('La tendance générale est à la hausse — on est dans le bon sens');
+    if (smc.zone === 'DISCOUNT')          reasons.push('Le prix est en zone de soldes — on achète pas cher');
+    if (bd.ob_present > 0)                reasons.push('Les gros investisseurs ont acheté dans cette zone avant — zone de support forte');
+    if (bd.fvg_present > 0)               reasons.push('Il y a un déséquilibre de prix ici — le marché veut revenir à l\'équilibre');
+    if (opts.direction === 'BULLISH')      reasons.push('Les données d\'options montrent que les pros parient à la hausse');
+    if (sigs.indexOf('SMA200_BOUNCE') >= 0) reasons.push('Le prix rebondit sur sa ligne de support (moyenne 200 jours)');
+    if (sigs.indexOf('VOLUME_MOMENTUM') >= 0) reasons.push('Gros volume d\'achat — les institutions bougent');
+    if (smc.confluences && smc.confluences.strong) reasons.push('Plusieurs signaux convergent — c\'est un setup solide');
+    if (reasons.length === 0)              reasons.push('Score de confluence élevé (' + (setup.unified_score || 0).toFixed(1) + '/10)');
     return reasons.slice(0, 4);
   }
 
   // Inline styles
-  var sWrap  = { maxWidth: 820, margin: '0 auto' };
-  var sBlock = { background: '#111827', borderRadius: 10, padding: '20px 24px', marginBottom: 20, borderLeft: '4px solid' };
-  var sBig   = { fontSize: 22, fontWeight: 700, marginBottom: 8 };
-  var sSub   = { fontSize: 15, color: 'var(--text)', lineHeight: 1.7 };
+  var sWrap   = { maxWidth: 820, margin: '0 auto' };
+  var sBlock  = { background: '#111827', borderRadius: 10, padding: '20px 24px', marginBottom: 20, borderLeft: '4px solid' };
+  var sBig    = { fontSize: 22, fontWeight: 700, marginBottom: 8 };
   var sBullet = { fontSize: 14, color: '#cbd5e1', marginBottom: 6, paddingLeft: 8 };
-  var sStepWrap = { display: 'flex', gap: 0, marginBottom: 24 };
+
+  // ── Amélioration 1 : Barre de progression de la journée ───────────────────
+  var dayPhaseBar = (function() {
+    var cetMin   = getCETMinutes();
+    var KZ_START = 14 * 60 + 30;  // 870
+    var KZ_END   = 16 * 60 + 30;  // 990
+    var DAY_START = 9 * 60;        // 540
+    var DAY_END   = 19 * 60;       // 1140
+
+    var phase = cetMin < KZ_START ? 'pre' : cetMin < KZ_END ? 'kz' : 'close';
+
+    // Bar position (0–100%) within full day span
+    var barPct = Math.max(0, Math.min(100, (cetMin - DAY_START) / (DAY_END - DAY_START) * 100));
+
+    // Segments positions on bar
+    var kzStartPct = (KZ_START - DAY_START) / (DAY_END - DAY_START) * 100;
+    var kzEndPct   = (KZ_END   - DAY_START) / (DAY_END - DAY_START) * 100;
+
+    var timeLeft = phase === 'pre'   ? KZ_START - cetMin
+                 : phase === 'kz'    ? KZ_END - cetMin
+                 : null;
+    var tlH = timeLeft != null ? Math.floor(timeLeft / 60) : 0;
+    var tlM = timeLeft != null ? timeLeft % 60 : 0;
+    var tlStr = timeLeft != null
+      ? (tlH > 0 ? tlH + 'h ' : '') + tlM + 'min'
+      : null;
+
+    var phaseMsg = phase === 'pre'
+      ? '☀️ PRÉ-MARCHÉ — Prépare tes candidats' + (tlStr ? ' — killzone dans ' + tlStr : '')
+      : phase === 'kz'
+      ? '🔴 KILLZONE ACTIVE — Session de trading en cours' + (tlStr ? ' — encore ' + tlStr : '')
+      : '🌙 CLÔTURE — Clôture tes trades et note tes résultats';
+    var msgClr = phase === 'pre' ? '#f59e0b' : phase === 'kz' ? '#ef4444' : '#10b981';
+
+    var phaseBg = { pre: '#0d1829', kz: 'rgba(239,68,68,.05)', close: 'rgba(16,185,129,.05)' }[phase];
+
+    return (
+      <div style={{ background: phaseBg, border: '1px solid #1e293b', borderRadius: 10, padding: '14px 20px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+          <span style={{ color: phase === 'pre' ? '#f59e0b' : '#475569', fontWeight: phase === 'pre' ? 700 : 400 }}>☀️ PRÉ-MARCHÉ</span>
+          <span style={{ color: phase === 'kz' ? '#ef4444' : '#475569', fontWeight: phase === 'kz' ? 700 : 400 }}>🔴 KILLZONE 14h30–16h30</span>
+          <span style={{ color: phase === 'close' ? '#10b981' : '#475569', fontWeight: phase === 'close' ? 700 : 400 }}>🌙 CLÔTURE</span>
+        </div>
+        <div style={{ position: 'relative', height: 10, background: '#1e293b', borderRadius: 5, marginBottom: 10 }}>
+          {/* Killzone segment highlight */}
+          <div style={{ position: 'absolute', left: kzStartPct + '%', width: (kzEndPct - kzStartPct) + '%', top: 0, bottom: 0, background: 'rgba(239,68,68,.25)', borderRadius: 2 }} />
+          {/* Progress fill */}
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: barPct + '%', background: msgClr, borderRadius: 5, transition: 'width 1s linear' }} />
+          {/* Cursor */}
+          <div style={{ position: 'absolute', left: 'calc(' + barPct + '% - 6px)', top: -3, width: 12, height: 16, background: '#fff', borderRadius: 3, boxShadow: '0 0 6px rgba(0,0,0,.5)' }} />
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: msgClr }}>{phaseMsg}</div>
+      </div>
+    );
+  })();
 
   // ── Section 1 : Verdict du jour ───────────────────────────────────────────
   var verdictBlock = (function() {
@@ -4434,33 +4521,59 @@ function CoachTab(props) {
               var isA = s.grade === 'A+' || s.grade === 'A';
               var borderClr = isA ? '#10b981' : '#3b82f6';
               var isSelected = selected && selected.ticker === s.ticker;
+              var sd = scoreDisplay(s.unified_score);
               return (
                 <div key={s.ticker} style={{ background: isSelected ? 'rgba(16,185,129,.06)' : '#111827', border: '1px solid ' + (isSelected ? '#10b981' : '#1e293b'), borderLeft: '4px solid ' + borderClr, borderRadius: 8, padding: '18px 20px', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                    <span style={{ fontSize: 18, fontWeight: 700, color: borderClr }}>{s.ticker}</span>
-                    <span style={{ fontSize: 12, color: borderClr, background: 'rgba(16,185,129,.1)', padding: '2px 8px', borderRadius: 4 }}>Grade {s.grade}</span>
-                    <span style={{ fontSize: 12, color: '#64748b' }}>{(s.unified_score || 0).toFixed(1)}/10</span>
-                    <span style={{ fontSize: 16, marginLeft: 'auto' }}>
-                      {isA ? '🟢 OPPORTUNITÉ SOLIDE' : '🔵 OPPORTUNITÉ CORRECTE'}
-                    </span>
+                  {/* Header */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 20, fontWeight: 700, color: borderClr }}>{s.ticker}</span>
+                        <span style={{ fontSize: 11, color: borderClr, background: isA ? 'rgba(16,185,129,.12)' : 'rgba(59,130,246,.12)', padding: '2px 8px', borderRadius: 4, fontWeight: 700 }}>Grade {s.grade}</span>
+                      </div>
+                      {/* Score dots */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ display: 'flex' }}>
+                          {[1,2,3,4,5,6,7,8,9,10].map(function(i) {
+                            return <span key={i} style={{ color: i <= Math.round(s.unified_score || 0) ? sd.clr : '#1e293b', fontSize: 14, margin: '0 1px' }}>●</span>;
+                          })}
+                        </div>
+                        <span style={{ fontSize: 12, color: '#64748b' }}>{(s.unified_score || 0).toFixed(1)}/10</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: sd.clr, marginTop: 4 }}>{sd.txt}</div>
+                    </div>
+                    <span style={{ marginLeft: 'auto', fontSize: 15 }}>{isA ? '🟢' : '🔵'}</span>
                   </div>
+                  {/* Levels */}
                   {sz && s.best_entry ? (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14, fontSize: 14 }}>
-                      <div style={{ color: '#cbd5e1' }}>💰 Acheter à <strong style={{ color: 'var(--text)' }}>${s.best_entry}</strong></div>
-                      <div style={{ color: '#ef4444' }}>🛑 Stop si descend à <strong>${s.best_stop}</strong> (perte max : ${sz.lossAmt})</div>
-                      <div style={{ color: '#10b981' }}>🎯 Vendre si monte à <strong>${s.best_target}</strong> (gain : ${sz.gainAmt})</div>
-                      <div style={{ color: '#94a3b8' }}>📊 {sz.shares} actions — coût total ${sz.totalCost.toLocaleString()}</div>
-                      <div style={{ color: '#94a3b8' }}>📊 Risque : ${sz.lossAmt} ({sz.riskPct}% du capital)</div>
-                      <div style={{ color: '#94a3b8' }}>📊 R:R : {s.rr_ratio ? s.rr_ratio + '×' : '≥ 2.5×'}</div>
+                    <div style={{ background: '#0a0e17', borderRadius: 6, padding: '12px 14px', marginBottom: 14 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 14 }}>
+                        <div style={{ color: '#cbd5e1' }}>💰 Acheter à <strong style={{ color: 'var(--text)' }}>${s.best_entry}</strong></div>
+                        <div style={{ color: '#ef4444' }}>🛑 Stop à <strong>${s.best_stop}</strong> <span style={{ color: '#64748b', fontSize: 12 }}>(perte max : ${sz.lossAmt})</span></div>
+                        <div style={{ color: '#10b981' }}>🎯 Target <strong>${s.best_target}</strong> <span style={{ color: '#64748b', fontSize: 12 }}>(gain : ${sz.gainAmt})</span></div>
+                        <div style={{ color: '#64748b', fontSize: 13 }}>📦 {sz.shares} actions · ${sz.totalCost.toLocaleString()} total</div>
+                      </div>
+                      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #1e293b', display: 'flex', gap: 20, fontSize: 12, color: '#64748b' }}>
+                        <span>Risque : <strong style={{ color: sz.riskPct <= 1 ? '#10b981' : '#f59e0b' }}>${sz.lossAmt} ({sz.riskPct}%)</strong></span>
+                        <span>R:R : <strong style={{ color: '#10b981' }}>{s.rr_ratio ? s.rr_ratio + '×' : '≥ 2.5×'}</strong></span>
+                      </div>
                     </div>
                   ) : (
                     <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
-                      Niveaux d'entrée en cours de calcul — analyse complète dans l'onglet 🧠 Analyse SMC
+                      Niveaux en cours de calcul — analyse complète dans 🧠 Analyse SMC
                     </div>
                   )}
+                  {/* Reasons */}
                   <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6, letterSpacing: 1, textTransform: 'uppercase' }}>Pourquoi c'est intéressant :</div>
-                    {reasons.map(function(r, i) { return <div key={i} style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 4 }}>✅ {r}</div>; })}
+                    <div style={{ fontSize: 11, color: '#475569', marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' }}>Pourquoi c'est intéressant :</div>
+                    {reasons.map(function(r, i) {
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                          <span style={{ color: '#10b981', flexShrink: 0 }}>✅</span>
+                          <span style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>{r}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                     <a href={'https://www.tradingview.com/chart/?symbol=NASDAQ:' + s.ticker} target="_blank" rel="noopener noreferrer"
@@ -4470,7 +4583,7 @@ function CoachTab(props) {
                     <button style={isSelected ? sBtnGhost : sBtnGreen}
                             onClick={function() {
                               setSelected(isSelected ? null : s);
-                              if (!isSelected) { setStep(3); setTvConfirmed(false); }
+                              if (!isSelected) { setStep(3); setTvChecks([false,false,false,false,false]); }
                             }}>
                       {isSelected ? '✗ Désélectionner' : '➡️ Choisir ce trade'}
                     </button>
@@ -4502,35 +4615,50 @@ function CoachTab(props) {
 
   else if (step === 3) {
     var sel = selected || {};
+    var TV_CHECKS = [
+      { label: 'Le prix est proche de la ligne bleue ENTRY' + (sel.best_entry ? ' ($' + sel.best_entry + ')' : ''), hint: 'Si le prix est loin de plus de 2%, attends qu\'il se rapproche avant d\'acheter' },
+      { label: 'Je vois une zone verte (Order Block) près du prix', hint: 'C\'est la zone de support des gros investisseurs — ils ont acheté ici avant' },
+      { label: 'La ligne orange SMA200 est EN DESSOUS du prix', hint: 'Ça veut dire que la tendance long terme est haussière — on est du bon côté' },
+      { label: 'Il n\'y a pas de GROSSE bougie rouge en cours', hint: 'Si le prix chute brutalement, ne rattrape pas le couteau — attends demain' },
+      { label: 'On est entre 14h30 et 16h30 (killzone)', hint: 'C\'est la seule fenêtre de trading — ni avant, ni après' },
+    ];
+    var allChecked = tvChecks.every(function(c) { return c; });
     stepContent = (
       <div style={Object.assign({}, sBlock, { borderLeftColor: '#f59e0b', background: '#0d1829' })}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📈 Étape 3 — Vérifier sur TradingView</div>
-        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
-          Avant d'acheter {sel.ticker}, regarde le graphique pour confirmer visuellement que le setup a du sens.
+        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 20 }}>
+          Avant d'acheter {sel.ticker}, coche ces 5 points sur le graphique. Chaque case = une vérification réelle.
         </div>
-        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#10b981' })}>
-          <div style={sInstTitle}>SUR TRADINGVIEW, TU DOIS VOIR :</div>
-          <div style={sInstLine}>1. La ligne bleue <strong>ENTRY</strong>{sel.best_entry ? ' ($' + sel.best_entry + ')' : ''} — le prix doit être PROCHE de cette ligne.</div>
-          <div style={sInstLine}>2. Une zone verte juste en dessous (Order Block) — zone où les gros investisseurs ont acheté avant. Si le prix est dans cette zone, c'est BON.</div>
-          <div style={sInstLine}>3. La ligne orange <strong>SMA200</strong> — si le prix est au-dessus, la tendance est bonne.</div>
-          <div style={sInstLine}>4. Le fond est légèrement vert = tu es en <strong>zone discount</strong> (prix en solde). ✅</div>
+        <div style={{ marginBottom: 20 }}>
+          {TV_CHECKS.map(function(chk, i) {
+            var checked = tvChecks[i];
+            return (
+              <div key={i}
+                   onClick={function() { var n = tvChecks.slice(); n[i] = !n[i]; setTvChecks(n); }}
+                   style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '14px 16px', marginBottom: 8, borderRadius: 8, cursor: 'pointer', background: checked ? 'rgba(16,185,129,.07)' : '#111827', border: '1px solid ' + (checked ? '#10b981' : '#1e293b'), transition: 'all .15s' }}>
+                <div style={{ width: 22, height: 22, borderRadius: 5, border: '2px solid ' + (checked ? '#10b981' : '#334155'), background: checked ? '#10b981' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1, transition: 'all .15s' }}>
+                  {checked && <span style={{ color: '#fff', fontSize: 13, fontWeight: 700 }}>✓</span>}
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: checked ? 700 : 400, color: checked ? 'var(--text)' : '#94a3b8', marginBottom: 3 }}>{chk.label}</div>
+                  <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.5 }}>→ {chk.hint}</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#ef4444' })}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', marginBottom: 10, letterSpacing: 1 }}>⚠️ SIGNAUX D'ALERTE — NE PAS ACHETER SI :</div>
-          <div style={sInstLine}>• Le prix chute fortement (grosse bougie rouge)</div>
-          <div style={sInstLine}>• Le prix est très loin de la ligne ENTRY</div>
-          <div style={sInstLine}>• Tu vois beaucoup de rouge sur le graphique</div>
-          <div style={sInstLine}>• Tu n'es pas sûr(e) — mieux vaut passer</div>
-        </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <a href={'https://www.tradingview.com/chart/?symbol=NASDAQ:' + (sel.ticker || '')} target="_blank" rel="noopener noreferrer"
              style={Object.assign({}, sBtnPrimary, { textDecoration: 'none', display: 'inline-flex', alignItems: 'center' })}>
             📈 Ouvrir TradingView
           </a>
-          <button style={sBtnGreen} onClick={function() { setTvConfirmed(true); setStep(4); }}>
-            ✅ Ça a l'air bon, je continue
+          <button
+            style={allChecked ? sBtnGreen : Object.assign({}, sBtnGhost, { cursor: 'not-allowed', opacity: 0.5 })}
+            disabled={!allChecked}
+            onClick={function() { if (allChecked) { setTvConfirmed(true); setStep(4); } }}>
+            {allChecked ? '✅ C\'est bon, je continue' : '☐ Coche toutes les vérifications d\'abord (' + tvChecks.filter(Boolean).length + '/5)'}
           </button>
-          <button style={sBtnGhost} onClick={function() { setSelected(null); setStep(2); }}>
+          <button style={sBtnGhost} onClick={function() { setSelected(null); setTvChecks([false,false,false,false,false]); setStep(2); }}>
             ❌ Ça ne me convainc pas, je passe
           </button>
         </div>
@@ -4579,11 +4707,25 @@ function CoachTab(props) {
   else if (step === 5) {
     var sel5 = selected || {};
     var sz5  = computeSizing(sel5) || {};
+    var tc   = tradesProgress.total_closed || 0;
+    var wins = tradesProgress.wins || 0;
+    var wr   = tc > 0 ? Math.round(wins / tc * 100) : null;
+
+    // Emotional message (amélioration 5)
+    var emotMsg = null;
+    if (tc === 0) {
+      emotMsg = { icon: '🎉', clr: '#10b981', title: 'Premier trade enregistré !', body: 'Tu viens de faire le premier pas. N\'oublie pas : même si ce trade perd, tu as fait les choses correctement. C\'est le PROCESSUS qui compte, pas le résultat d\'un seul trade.' };
+    } else if (wr !== null && wr >= 50) {
+      emotMsg = { icon: '📈', clr: '#10b981', title: 'Tu es sur la bonne voie !', body: 'Winrate actuel : ' + wr + '%. Continue à respecter tes règles — c\'est ce qui fait la différence sur le long terme.' };
+    } else if (wr !== null && wr < 40 && tc >= 10) {
+      emotMsg = { icon: '📊', clr: '#f59e0b', title: 'Ton winrate est en dessous de 50%.', body: 'C\'est normal au début. Regarde ton edge tracker (onglet Performance) pour identifier quel type de setup fonctionne le mieux pour toi. Avec un R:R 2.5×, 40% de WR suffit pour être rentable !' };
+    }
+
     stepContent = (
       <div style={Object.assign({}, sBlock, { borderLeftColor: '#10b981', background: '#0d1829' })}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📝 Étape 5 — Enregistrer dans le Journal</div>
         <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
-          Enregistre ton trade pour suivre ta performance. Le formulaire sera pré-rempli automatiquement.
+          Le formulaire sera pré-rempli automatiquement avec les niveaux du setup.
         </div>
         <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#10b981' })}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 14 }}>
@@ -4608,6 +4750,12 @@ function CoachTab(props) {
             📝 Ouvrir le Journal (pré-rempli)
           </button>
         </div>
+        {emotMsg && (
+          <div style={{ background: emotMsg.clr + '14', border: '1px solid ' + emotMsg.clr + '44', borderRadius: 8, padding: '14px 18px', marginBottom: 16 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: emotMsg.clr, marginBottom: 6 }}>{emotMsg.icon} {emotMsg.title}</div>
+            <div style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.7 }}>{emotMsg.body}</div>
+          </div>
+        )}
         <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#10b981' })}>
           <div style={{ fontSize: 13, fontWeight: 700, color: '#10b981', marginBottom: 10 }}>📌 RAPPELS IMPORTANTS :</div>
           <div style={sInstLine}>• Ne touche <strong>PAS</strong> ton stop loss (ne le déplace jamais vers le bas)</div>
@@ -4672,6 +4820,53 @@ function CoachTab(props) {
     </div>
   ) : null;
 
+  // ── Amélioration 6 : Progression vers 50 trades ──────────────────────────
+  var progressSection = (function() {
+    var tc    = tradesProgress.total_closed || 0;
+    var pct   = Math.min(100, tradesProgress.progress_pct || 0);
+    var msg   = tradesProgress.milestone_message || '';
+    var barClr = tc < 10 ? '#ef4444' : tc < 20 ? '#f59e0b' : tc < 50 ? '#3b82f6' : '#10b981';
+    var milestones = [
+      { n: 10, label: '10 trades', desc: 'Sharpe/Sortino', done: tc >= 10 },
+      { n: 20, label: '20 trades', desc: 'Monte Carlo',    done: tc >= 20 },
+      { n: 50, label: '50 trades', desc: 'Stats fiables',  done: tc >= 50 },
+    ];
+    var QUOTES = [
+      '"Chaque trade enregistré, gagné ou perdu, te rapproche d\'une meilleure compréhension de ton edge."',
+      '"La discipline fait la différence entre un trader et un joueur."',
+      '"Les statistiques ne mentent pas. Tes 50 trades te diront la vérité."',
+    ];
+    var quote = QUOTES[tc % QUOTES.length];
+    return (
+      <div style={{ background: '#111827', border: '1px solid #1e293b', borderRadius: 10, padding: '18px 22px', marginBottom: 20 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 14 }}>🎯 TA PROGRESSION</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 22, fontWeight: 700, color: barClr }}>{tc}</span>
+          <span style={{ fontSize: 14, color: '#64748b' }}>/ 50 trades clôturés</span>
+        </div>
+        <div style={{ background: '#1e293b', borderRadius: 6, height: 10, marginBottom: 8, position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: pct + '%', background: barClr, borderRadius: 6, transition: 'width .4s' }} />
+          {/* Milestone markers */}
+          {[10, 20, 50].map(function(m) {
+            return <div key={m} style={{ position: 'absolute', left: (m / 50 * 100) + '%', top: 0, bottom: 0, width: 2, background: '#0a0e17', opacity: 0.6 }} />;
+          })}
+        </div>
+        <div style={{ fontSize: 12, color: barClr, marginBottom: 12 }}>{msg || (tc >= 50 ? '🎯 50+ trades atteints ! Tes métriques sont significatives' : '')}</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          {milestones.map(function(m) {
+            return (
+              <div key={m.n} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <span style={{ color: m.done ? '#10b981' : '#334155', fontSize: 14 }}>{m.done ? '✅' : '🔲'}</span>
+                <span style={{ color: m.done ? '#10b981' : '#475569' }}>{m.label} <span style={{ color: '#334155' }}>({m.desc})</span></span>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ fontSize: 12, color: '#475569', fontStyle: 'italic', lineHeight: 1.6 }}>{quote}</div>
+      </div>
+    );
+  })();
+
   // ── Section 4 : Règles d'or ───────────────────────────────────────────────
   var RULES = [
     { n: 1, icon: '🛑', rule: 'STOP LOSS = SACRÉ',          detail: 'Ne le déplace JAMAIS vers le bas' },
@@ -4708,11 +4903,13 @@ function CoachTab(props) {
 
   return (
     <div style={sWrap}>
+      {dayPhaseBar}
       {eventBanner}
       {verdictBlock}
       {stepNav}
       {stepContent}
       {posSection}
+      {progressSection}
       {rulesSection}
     </div>
   );
@@ -5197,7 +5394,7 @@ function TradingDashboard() {
 
       <main className="content">
         {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} tradesProgress={tradesProgress} />}
-        {tab === 'coach'     && <CoachTab data={data} posMonitor={posMonitor} scanResults={scanResults} scanLoading={scanLoading} onScan={loadScanUnified} onRefresh={handleRefresh} refreshLoading={loading} lastUpd={lastUpd} onGoToJournal={handleAddTradeFromSmc} />}
+        {tab === 'coach'     && <CoachTab data={data} posMonitor={posMonitor} scanResults={scanResults} scanLoading={scanLoading} onScan={loadScanUnified} onRefresh={handleRefresh} refreshLoading={loading} lastUpd={lastUpd} onGoToJournal={handleAddTradeFromSmc} tradesProgress={tradesProgress} />}
         {tab === 'watchlist' && <WatchlistTab data={data} />}
         {tab === 'reddit'    && <RedditTab data={data} discoveries={discoveries} discLoading={discLoading} onLoadDisc={loadDiscoveries} onAnalyzeTk={analyzeDiscovery} onAddTemp={addTempTicker} tempWatchlist={tempWatchlist} />}
         {tab === 'news'      && <NewsTab      data={data} />}
