@@ -4181,8 +4181,546 @@ Refresh:  click 🔄 to update all data (takes ~15s)`}</pre>
   );
 }
 
+// ── Coach Tab ──────────────────────────────────────────────────────────────
+
+function CoachTab(props) {
+  var data            = props.data            || {};
+  var posMonitor      = props.posMonitor      || { positions: [], alerts: [] };
+  var scanResults     = props.scanResults     || [];
+  var scanLoading     = props.scanLoading     || false;
+  var onScan          = props.onScan          || function(){};
+  var onRefresh       = props.onRefresh       || function(){};
+  var refreshLoading  = props.refreshLoading  || false;
+  var lastUpd         = props.lastUpd;
+  var onGoToJournal   = props.onGoToJournal   || function(){};
+
+  var CAPITAL  = 10000;
+  var RISK_PCT = 1.0;
+
+  // ── Hooks (ALL at top) ─────────────────────────────────────────────────────
+  var stepState        = useState(1);
+  var step             = stepState[0];
+  var setStep          = stepState[1];
+
+  var selectedState    = useState(null);
+  var selected         = selectedState[0];
+  var setSelected      = selectedState[1];
+
+  var tvConfirmedState = useState(false);
+  var tvConfirmed      = tvConfirmedState[0];
+  var setTvConfirmed   = tvConfirmedState[1];
+
+  var rulesOpenState   = useState(false);
+  var rulesOpen        = rulesOpenState[0];
+  var setRulesOpen     = rulesOpenState[1];
+
+  // ── Derived data ──────────────────────────────────────────────────────────
+  var market       = data.market || {};
+  var macro        = data.macro  || {};
+  var regime       = market.regime  || null;
+  var verdict      = macro.verdict  || null;
+  var macroEvents  = macro.events   || [];
+  var todayEvent   = macroEvents.find(function(e) { return e && e.today; }) || null;
+  var positions    = posMonitor.positions || [];
+
+  var goodSetups = scanResults.filter(function(s) { return s.grade === 'A+' || s.grade === 'A' || s.grade === 'B'; });
+  var badSetups  = scanResults.filter(function(s) { return s.grade !== 'A+' && s.grade !== 'A' && s.grade !== 'B'; });
+
+  // Is last update today?
+  var today         = new Date();
+  var refreshedToday = lastUpd ? (lastUpd.toDateString() === today.toDateString()) : false;
+
+  // Compute trade sizing for a selected setup
+  function computeSizing(setup) {
+    var entry  = setup.best_entry;
+    var stop   = setup.best_stop;
+    var target = setup.best_target;
+    if (!entry || !stop || entry <= stop) return null;
+    var riskPerShare = entry - stop;
+    var riskAmt      = CAPITAL * RISK_PCT / 100;
+    var shares       = Math.max(1, Math.floor(riskAmt / riskPerShare));
+    var totalCost    = shares * entry;
+    var gainAmt      = target ? shares * (target - entry) : null;
+    var lossAmt      = shares * riskPerShare;
+    return { shares: shares, totalCost: Math.round(totalCost), gainAmt: gainAmt ? Math.round(gainAmt) : null, lossAmt: Math.round(lossAmt), riskPct: (lossAmt / CAPITAL * 100).toFixed(2) };
+  }
+
+  // Build "pourquoi" list for a setup
+  function buildReasons(setup) {
+    var reasons = [];
+    var smc = setup.smc_analysis || {};
+    if (smc.zone === 'DISCOUNT')  reasons.push('Le prix est en zone de soldes (discount)');
+    if (smc.bias === 'BULL')      reasons.push('La tendance long terme est haussière (SMA200)');
+    var opts = setup.options_data || {};
+    if (opts.direction === 'BULLISH') reasons.push('Les gros investisseurs achètent (options flow)');
+    var sigs = setup.setup_detector_signals || [];
+    if (sigs.indexOf('DISCOUNT_ZONE') >= 0 && smc.zone !== 'DISCOUNT') reasons.push('Zone de discount détectée (setup_detector)');
+    if (sigs.indexOf('SMA200_BOUNCE') >= 0) reasons.push('Rebond sur la SMA200 détecté');
+    if (sigs.indexOf('VOLUME_MOMENTUM') >= 0) reasons.push('Volume en forte hausse (momentum)');
+    var bd = setup.scoring_breakdown || {};
+    if (bd.ob_present > 0) reasons.push('Order Block institutionnel présent');
+    if (bd.fvg_present > 0) reasons.push('Fair Value Gap (zone de remplissage) identifié');
+    if (reasons.length === 0) reasons.push('Score de confluence élevé (' + (setup.unified_score || 0).toFixed(1) + '/10)');
+    return reasons.slice(0, 4);
+  }
+
+  // Inline styles
+  var sWrap  = { maxWidth: 820, margin: '0 auto' };
+  var sBlock = { background: '#111827', borderRadius: 10, padding: '20px 24px', marginBottom: 20, borderLeft: '4px solid' };
+  var sBig   = { fontSize: 22, fontWeight: 700, marginBottom: 8 };
+  var sSub   = { fontSize: 15, color: 'var(--text)', lineHeight: 1.7 };
+  var sBullet = { fontSize: 14, color: '#cbd5e1', marginBottom: 6, paddingLeft: 8 };
+  var sStepWrap = { display: 'flex', gap: 0, marginBottom: 24 };
+
+  // ── Section 1 : Verdict du jour ───────────────────────────────────────────
+  var verdictBlock = (function() {
+    var noTrade = verdict === 'NO TRADE' || regime === 'BEAR';
+    var prudent  = !noTrade && (verdict === 'PRUDENCE' || regime === 'NEUTRAL');
+    var go       = !noTrade && !prudent;
+    var bg, border, icon, title, lines;
+
+    if (noTrade) {
+      bg = 'rgba(239,68,68,.08)'; border = '#ef4444';
+      icon = '🚫'; title = 'AUJOURD\'HUI ON NE TRADE PAS';
+      lines = [
+        'Le marché est dangereux (' + (regime === 'BEAR' ? 'tendance baissière' : 'verdict NO TRADE') + ').',
+        'Profite de ta journée — le trading c\'est aussi savoir ne rien faire.',
+        'Reviens demain.',
+      ];
+    } else if (prudent) {
+      bg = 'rgba(245,158,11,.08)'; border = '#f59e0b';
+      icon = '⚠️'; title = 'JOURNÉE PRUDENTE — Risque réduit';
+      lines = [
+        'Le marché est incertain. Si tu trades :',
+        '• Réduis ton risque à 0.5% par trade (au lieu de 1%)',
+        '• Ne prends que les Grade A (pas de B ni C)',
+        '• Max 1 trade aujourd\'hui',
+      ];
+    } else {
+      bg = 'rgba(16,185,129,.08)'; border = '#10b981';
+      icon = '✅'; title = 'JOURNÉE FAVORABLE — On peut trader';
+      lines = [
+        'Le marché est positif. Tu peux chercher des opportunités.',
+        '• Risque normal : 1% par trade',
+        '• Max 2 trades aujourd\'hui',
+        '• Concentre-toi sur les Grade A et B',
+      ];
+    }
+
+    return (
+      <div style={Object.assign({}, sBlock, { background: bg, borderLeftColor: border, marginBottom: todayEvent ? 8 : 20 })}>
+        <div style={sBig}>{icon} {title}</div>
+        {lines.map(function(l, i) { return <div key={i} style={sBullet}>{l}</div>; })}
+      </div>
+    );
+  })();
+
+  var eventBanner = todayEvent ? (
+    <div style={Object.assign({}, sBlock, { background: 'rgba(245,158,11,.08)', borderLeftColor: '#f59e0b', marginBottom: 20, padding: '12px 20px' })}>
+      <div style={{ fontSize: 14, fontWeight: 700, color: '#f59e0b' }}>
+        📅 ÉVÉNEMENT MACRO AUJOURD'HUI — {todayEvent.name || todayEvent.type} {todayEvent.time ? 'à ' + todayEvent.time : ''}
+      </div>
+      <div style={{ fontSize: 13, color: '#cbd5e1', marginTop: 4 }}>
+        ⚠️ Ne prends aucun trade 30 min avant et après l'annonce.
+      </div>
+    </div>
+  ) : null;
+
+  // ── Section 2 : Stepper ───────────────────────────────────────────────────
+  var STEPS = [
+    { n: 1, label: 'Mettre à jour les données',     icon: '📊' },
+    { n: 2, label: 'Trouver les opportunités',       icon: '🎯' },
+    { n: 3, label: 'Vérifier sur TradingView',       icon: '📈' },
+    { n: 4, label: 'Passer l\'ordre sur IBKR',       icon: '💰' },
+    { n: 5, label: 'Enregistrer dans le Journal',    icon: '📝' },
+  ];
+
+  var stepNav = (
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24, overflowX: 'auto', paddingBottom: 4 }}>
+      {STEPS.map(function(s, idx) {
+        var done    = step > s.n;
+        var active  = step === s.n;
+        var future  = step < s.n;
+        var numBg   = done ? '#10b981' : active ? '#3b82f6' : '#1e293b';
+        var numClr  = done || active ? '#fff' : '#64748b';
+        var lblClr  = active ? 'var(--text)' : done ? '#10b981' : '#64748b';
+        return (
+          <div key={s.n} style={{ display: 'flex', alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: done ? 'pointer' : 'default' }}
+                 onClick={function() { if (done) setStep(s.n); }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: numBg, color: numClr, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, border: active ? '2px solid #3b82f6' : 'none' }}>
+                {done ? '✓' : s.n}
+              </div>
+              <div style={{ fontSize: 10, color: lblClr, marginTop: 4, textAlign: 'center', maxWidth: 80, lineHeight: 1.3 }}>{s.icon} {s.label}</div>
+            </div>
+            {idx < STEPS.length - 1 && (
+              <div style={{ width: 40, height: 2, background: done ? '#10b981' : '#1e293b', margin: '0 4px', marginBottom: 20, flexShrink: 0 }} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // ── Step content ──────────────────────────────────────────────────────────
+  var sInstBlock = { background: '#0d1829', borderLeft: '3px solid #3b82f6', borderRadius: 6, padding: '14px 18px', marginBottom: 12 };
+  var sInstTitle = { fontSize: 12, fontWeight: 700, color: '#3b82f6', marginBottom: 10, letterSpacing: 1 };
+  var sInstLine  = { fontSize: 14, color: '#cbd5e1', marginBottom: 6, lineHeight: 1.6 };
+  var sBtn       = { padding: '10px 20px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 13 };
+  var sBtnPrimary = Object.assign({}, sBtn, { background: '#3b82f6', color: '#fff' });
+  var sBtnGreen   = Object.assign({}, sBtn, { background: '#10b981', color: '#fff' });
+  var sBtnGhost   = Object.assign({}, sBtn, { background: 'transparent', border: '1px solid #334155', color: '#94a3b8' });
+
+  var stepContent = null;
+
+  if (step === 1) {
+    var updTime = lastUpd ? lastUpd.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : null;
+    stepContent = (
+      <div style={Object.assign({}, sBlock, { borderLeftColor: '#3b82f6', background: '#0d1829' })}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📊 Étape 1 — Mettre à jour les données</div>
+        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
+          Commence par rafraîchir les données du marché pour avoir les informations du jour.
+        </div>
+        {refreshedToday ? (
+          <div style={{ fontSize: 14, color: '#10b981', marginBottom: 16 }}>✅ Données à jour ({updTime})</div>
+        ) : (
+          <div style={{ fontSize: 14, color: '#f59e0b', marginBottom: 16 }}>⚠️ Pas encore rafraîchi aujourd'hui</div>
+        )}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button style={refreshLoading ? Object.assign({}, sBtnPrimary, { opacity: 0.6 }) : sBtnPrimary}
+                  onClick={function() { onRefresh(); }}
+                  disabled={refreshLoading}>
+            {refreshLoading ? '⟳ Scan en cours...' : '🔄 Rafraîchir maintenant'}
+          </button>
+          {refreshedToday && (
+            <button style={sBtnGreen} onClick={function() { setStep(2); }}>
+              ✅ Fait → Étape suivante
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  else if (step === 2) {
+    var scanDone = scanResults.length > 0;
+    stepContent = (
+      <div style={Object.assign({}, sBlock, { borderLeftColor: '#3b82f6', background: '#0d1829' })}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>🎯 Étape 2 — Trouver les meilleures opportunités</div>
+        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
+          Je scanne les tickers et je te dis lesquels sont intéressants.
+        </div>
+        {!scanDone && (
+          <button style={scanLoading ? Object.assign({}, sBtnPrimary, { opacity: 0.6 }) : sBtnPrimary}
+                  onClick={function() { onScan(); }}
+                  disabled={scanLoading}>
+            {scanLoading ? '⏳ Analyse en cours... (30-60 sec)' : '🎯 Scanner maintenant'}
+          </button>
+        )}
+        {scanDone && (
+          <div>
+            {goodSetups.length === 0 && (
+              <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#64748b', background: '#0a0e17' })}>
+                <div style={{ fontSize: 16, color: '#94a3b8', marginBottom: 8 }}>😌 Aucune bonne opportunité aujourd'hui.</div>
+                <div style={{ fontSize: 14, color: '#64748b', lineHeight: 1.7 }}>
+                  C'est normal ! Les meilleurs traders ne tradent pas tous les jours.<br/>
+                  Reviens demain — le marché sera toujours là.
+                </div>
+              </div>
+            )}
+            {goodSetups.map(function(s) {
+              var sz = computeSizing(s);
+              var reasons = buildReasons(s);
+              var isA = s.grade === 'A+' || s.grade === 'A';
+              var borderClr = isA ? '#10b981' : '#3b82f6';
+              var isSelected = selected && selected.ticker === s.ticker;
+              return (
+                <div key={s.ticker} style={{ background: isSelected ? 'rgba(16,185,129,.06)' : '#111827', border: '1px solid ' + (isSelected ? '#10b981' : '#1e293b'), borderLeft: '4px solid ' + borderClr, borderRadius: 8, padding: '18px 20px', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: borderClr }}>{s.ticker}</span>
+                    <span style={{ fontSize: 12, color: borderClr, background: 'rgba(16,185,129,.1)', padding: '2px 8px', borderRadius: 4 }}>Grade {s.grade}</span>
+                    <span style={{ fontSize: 12, color: '#64748b' }}>{(s.unified_score || 0).toFixed(1)}/10</span>
+                    <span style={{ fontSize: 16, marginLeft: 'auto' }}>
+                      {isA ? '🟢 OPPORTUNITÉ SOLIDE' : '🔵 OPPORTUNITÉ CORRECTE'}
+                    </span>
+                  </div>
+                  {sz && s.best_entry ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14, fontSize: 14 }}>
+                      <div style={{ color: '#cbd5e1' }}>💰 Acheter à <strong style={{ color: 'var(--text)' }}>${s.best_entry}</strong></div>
+                      <div style={{ color: '#ef4444' }}>🛑 Stop si descend à <strong>${s.best_stop}</strong> (perte max : ${sz.lossAmt})</div>
+                      <div style={{ color: '#10b981' }}>🎯 Vendre si monte à <strong>${s.best_target}</strong> (gain : ${sz.gainAmt})</div>
+                      <div style={{ color: '#94a3b8' }}>📊 {sz.shares} actions — coût total ${sz.totalCost.toLocaleString()}</div>
+                      <div style={{ color: '#94a3b8' }}>📊 Risque : ${sz.lossAmt} ({sz.riskPct}% du capital)</div>
+                      <div style={{ color: '#94a3b8' }}>📊 R:R : {s.rr_ratio ? s.rr_ratio + '×' : '≥ 2.5×'}</div>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+                      Niveaux d'entrée en cours de calcul — analyse complète dans l'onglet 🧠 Analyse SMC
+                    </div>
+                  )}
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6, letterSpacing: 1, textTransform: 'uppercase' }}>Pourquoi c'est intéressant :</div>
+                    {reasons.map(function(r, i) { return <div key={i} style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 4 }}>✅ {r}</div>; })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <a href={'https://www.tradingview.com/chart/?symbol=NASDAQ:' + s.ticker} target="_blank" rel="noopener noreferrer"
+                       style={Object.assign({}, sBtnGhost, { textDecoration: 'none', display: 'inline-flex', alignItems: 'center' })}>
+                      📈 Voir sur TradingView
+                    </a>
+                    <button style={isSelected ? sBtnGhost : sBtnGreen}
+                            onClick={function() {
+                              setSelected(isSelected ? null : s);
+                              if (!isSelected) { setStep(3); setTvConfirmed(false); }
+                            }}>
+                      {isSelected ? '✗ Désélectionner' : '➡️ Choisir ce trade'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {badSetups.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                {badSetups.map(function(s) {
+                  return (
+                    <div key={s.ticker} style={{ background: '#0a0e17', border: '1px solid #1e293b', borderRadius: 6, padding: '10px 14px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 13, color: '#475569' }}>⚪ <strong style={{ color: '#64748b' }}>{s.ticker}</strong> — PAS ASSEZ CONVAINCANT ({s.grade})</span>
+                      <span style={{ fontSize: 12, color: '#334155', marginLeft: 'auto' }}>On passe. Pas de trade forcé = bonne décision.</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
+              <button style={sBtnGhost} onClick={function() { onScan(); }}>🔄 Re-scanner</button>
+              {selected && <button style={sBtnGreen} onClick={function() { setStep(3); }}>➡️ Continuer avec {selected.ticker}</button>}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  else if (step === 3) {
+    var sel = selected || {};
+    stepContent = (
+      <div style={Object.assign({}, sBlock, { borderLeftColor: '#f59e0b', background: '#0d1829' })}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📈 Étape 3 — Vérifier sur TradingView</div>
+        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
+          Avant d'acheter {sel.ticker}, regarde le graphique pour confirmer visuellement que le setup a du sens.
+        </div>
+        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#10b981' })}>
+          <div style={sInstTitle}>SUR TRADINGVIEW, TU DOIS VOIR :</div>
+          <div style={sInstLine}>1. La ligne bleue <strong>ENTRY</strong>{sel.best_entry ? ' ($' + sel.best_entry + ')' : ''} — le prix doit être PROCHE de cette ligne.</div>
+          <div style={sInstLine}>2. Une zone verte juste en dessous (Order Block) — zone où les gros investisseurs ont acheté avant. Si le prix est dans cette zone, c'est BON.</div>
+          <div style={sInstLine}>3. La ligne orange <strong>SMA200</strong> — si le prix est au-dessus, la tendance est bonne.</div>
+          <div style={sInstLine}>4. Le fond est légèrement vert = tu es en <strong>zone discount</strong> (prix en solde). ✅</div>
+        </div>
+        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#ef4444' })}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', marginBottom: 10, letterSpacing: 1 }}>⚠️ SIGNAUX D'ALERTE — NE PAS ACHETER SI :</div>
+          <div style={sInstLine}>• Le prix chute fortement (grosse bougie rouge)</div>
+          <div style={sInstLine}>• Le prix est très loin de la ligne ENTRY</div>
+          <div style={sInstLine}>• Tu vois beaucoup de rouge sur le graphique</div>
+          <div style={sInstLine}>• Tu n'es pas sûr(e) — mieux vaut passer</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 }}>
+          <a href={'https://www.tradingview.com/chart/?symbol=NASDAQ:' + (sel.ticker || '')} target="_blank" rel="noopener noreferrer"
+             style={Object.assign({}, sBtnPrimary, { textDecoration: 'none', display: 'inline-flex', alignItems: 'center' })}>
+            📈 Ouvrir TradingView
+          </a>
+          <button style={sBtnGreen} onClick={function() { setTvConfirmed(true); setStep(4); }}>
+            ✅ Ça a l'air bon, je continue
+          </button>
+          <button style={sBtnGhost} onClick={function() { setSelected(null); setStep(2); }}>
+            ❌ Ça ne me convainc pas, je passe
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  else if (step === 4) {
+    var sel4  = selected || {};
+    var sz4   = computeSizing(sel4) || {};
+    stepContent = (
+      <div style={Object.assign({}, sBlock, { borderLeftColor: '#8b5cf6', background: '#0d1829' })}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>💰 Étape 4 — Passer l'ordre sur IBKR</div>
+        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
+          Tu as vérifié le setup sur TradingView. Il est temps de passer l'ordre.
+        </div>
+        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#8b5cf6' })}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#8b5cf6', marginBottom: 14, letterSpacing: 1 }}>SUR IBKR (TWS OU APPLI MOBILE) :</div>
+          <div style={sInstLine}>1. Cherche le ticker : <strong style={{ color: 'var(--text)', fontSize: 16 }}>{sel4.ticker}</strong></div>
+          <div style={sInstLine}>2. Clique <strong>Acheter (BUY)</strong></div>
+          <div style={sInstLine}>3. Type d'ordre : <strong>LIMIT</strong></div>
+          <div style={sInstLine}>4. Prix : <strong style={{ color: '#3b82f6' }}>${sel4.best_entry}</strong> (le prix ENTRY)</div>
+          <div style={sInstLine}>5. Quantité : <strong style={{ color: '#3b82f6' }}>{sz4.shares || '?'} actions</strong></div>
+          <div style={{ marginLeft: 16, marginTop: 8, marginBottom: 8, padding: '10px 14px', background: 'rgba(139,92,246,.08)', borderRadius: 6, borderLeft: '3px solid #8b5cf6' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#8b5cf6', marginBottom: 6 }}>6. IMPORTANT — Ajoute un bracket order :</div>
+            <div style={{ fontSize: 14, color: '#cbd5e1', marginBottom: 4 }}>• Stop Loss : <strong style={{ color: '#ef4444' }}>${sel4.best_stop}</strong></div>
+            <div style={{ fontSize: 14, color: '#cbd5e1' }}>• Take Profit : <strong style={{ color: '#10b981' }}>${sel4.best_target}</strong></div>
+          </div>
+          <div style={sInstLine}>7. Vérifie TOUT puis clique <strong>Transmettre</strong></div>
+        </div>
+        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#ef4444' })}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', marginBottom: 10, letterSpacing: 1 }}>⚠️ VÉRIFICATIONS AVANT D'ENVOYER :</div>
+          <div style={sInstLine}>• Le montant total (<strong>${sz4.totalCost ? sz4.totalCost.toLocaleString() : '?'}</strong>) ne dépasse pas 3% de ton capital ?</div>
+          <div style={sInstLine}>• Tu n'as pas déjà 2 trades ouverts ?</div>
+          <div style={sInstLine}>• Le stop loss est bien en place ?</div>
+          <div style={sInstLine}>• On est entre 14h30 et 16h30 (killzone) ?</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+          <button style={sBtnGreen} onClick={function() { setStep(5); }}>✅ Ordre passé</button>
+          <button style={sBtnGhost} onClick={function() { setStep(3); }}>← Retour</button>
+        </div>
+      </div>
+    );
+  }
+
+  else if (step === 5) {
+    var sel5 = selected || {};
+    var sz5  = computeSizing(sel5) || {};
+    stepContent = (
+      <div style={Object.assign({}, sBlock, { borderLeftColor: '#10b981', background: '#0d1829' })}>
+        <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📝 Étape 5 — Enregistrer dans le Journal</div>
+        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
+          Enregistre ton trade pour suivre ta performance. Le formulaire sera pré-rempli automatiquement.
+        </div>
+        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#10b981' })}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 14 }}>
+            <div style={{ color: '#94a3b8' }}>Ticker :</div>    <div style={{ color: 'var(--text)', fontWeight: 700 }}>{sel5.ticker}</div>
+            <div style={{ color: '#94a3b8' }}>Entry :</div>     <div style={{ color: '#3b82f6', fontWeight: 700 }}>${sel5.best_entry}</div>
+            <div style={{ color: '#94a3b8' }}>Stop :</div>      <div style={{ color: '#ef4444', fontWeight: 700 }}>${sel5.best_stop}</div>
+            <div style={{ color: '#94a3b8' }}>Target :</div>    <div style={{ color: '#10b981', fontWeight: 700 }}>${sel5.best_target}</div>
+            <div style={{ color: '#94a3b8' }}>Actions :</div>   <div style={{ color: 'var(--text)' }}>{sz5.shares || '?'}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+          <button style={sBtnGreen} onClick={function() {
+            onGoToJournal({
+              ticker:       sel5.ticker,
+              entry_price:  sel5.best_entry,
+              stop_price:   sel5.best_stop,
+              target_price: sel5.best_target,
+              setup_type:   (sel5.setup_detector_signals || []).join(', ') || 'COACH',
+              direction:    'BUY',
+            });
+          }}>
+            📝 Ouvrir le Journal (pré-rempli)
+          </button>
+        </div>
+        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#10b981' })}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#10b981', marginBottom: 10 }}>📌 RAPPELS IMPORTANTS :</div>
+          <div style={sInstLine}>• Ne touche <strong>PAS</strong> ton stop loss (ne le déplace jamais vers le bas)</div>
+          <div style={sInstLine}>• Si le prix atteint ${sel5.best_target} → il sera vendu automatiquement (take profit)</div>
+          <div style={sInstLine}>• Si le prix descend à ${sel5.best_stop} → il sera vendu automatiquement (stop loss)</div>
+          <div style={sInstLine}>• Tu n'as <strong>RIEN</strong> d'autre à faire — le bracket order gère tout</div>
+          <div style={{ marginTop: 12, fontSize: 13, color: '#64748b' }}>
+            🎯 Après 16h30 : reviens clôturer le trade dans le Journal si nécessaire.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Section 3 : Positions en cours ───────────────────────────────────────
+  var posSection = positions.length > 0 ? (
+    <div style={{ marginBottom: 20 }}>
+      <div className="stitle">POSITIONS EN COURS</div>
+      {positions.map(function(pos) {
+        var entry   = pos.entry_price  || 0;
+        var cur     = pos.current_price || entry;
+        var stopP   = pos.stop_price   || 0;
+        var targP   = pos.target_price || 0;
+        var shares  = pos.shares       || 0;
+        var pnl     = pos.pnl != null ? pos.pnl : (cur - entry) * shares;
+        var pnlPos  = pnl >= 0;
+        var range   = targP - stopP;
+        var curPct  = range > 0 ? Math.max(0, Math.min(100, (cur - stopP) / range * 100)) : 50;
+        var rVal    = entry - stopP > 0 ? pnl / ((entry - stopP) * shares) : 0;
+        var closeToStop  = cur < entry && (cur - stopP) / (entry - stopP) < 0.25;
+        var hitTarget    = targP > 0 && cur >= targP;
+        var hitStop      = stopP > 0 && cur <= stopP;
+        var msg = hitTarget ? { clr: '#10b981', text: '🎯 FÉLICITATIONS ! Le take profit a été touché ! Va dans le Journal pour clôturer ce trade.' }
+                : hitStop   ? { clr: '#ef4444', text: '🛑 Le stop a été touché. C\'est une perte normale. Ne fais PAS de revenge trading.' }
+                : closeToStop ? { clr: '#f59e0b', text: '⚠️ Le prix se rapproche de ton stop. C\'est normal. Ne panique pas. Ne déplace PAS ton stop.' }
+                : { clr: '#10b981', text: '🟢 Tout va bien. Ne touche à rien. Le stop loss et le take profit sont en place.' };
+
+        return (
+          <div key={pos.id || pos.ticker} style={{ background: '#111827', border: '1px solid #1e293b', borderRadius: 8, padding: '16px 20px', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <span style={{ fontSize: 16, fontWeight: 700 }}>{pos.ticker}</span>
+              <span style={{ fontSize: 12, color: '#64748b' }}>· {shares} actions à ${entry}</span>
+              <span style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 700, color: pnlPos ? '#10b981' : '#ef4444' }}>
+                {pnlPos ? '+' : ''}{pnl.toFixed(2) + '$'} ({rVal.toFixed(2) + 'R'})
+              </span>
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginBottom: 4 }}>
+                <span>STOP ${stopP}</span><span>Prix actuel ${cur}</span><span>TARGET ${targP}</span>
+              </div>
+              <div style={{ background: '#1e293b', borderRadius: 4, height: 8, position: 'relative' }}>
+                <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: curPct + '%', background: pnlPos ? '#10b981' : '#ef4444', borderRadius: 4, transition: 'width .3s' }} />
+                <div style={{ position: 'absolute', left: 'calc(' + curPct + '% - 5px)', top: -3, width: 10, height: 14, background: '#fff', borderRadius: 3 }} />
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: msg.clr, background: msg.clr + '14', padding: '8px 12px', borderRadius: 6 }}>
+              {msg.text}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
+
+  // ── Section 4 : Règles d'or ───────────────────────────────────────────────
+  var RULES = [
+    { n: 1, icon: '🛑', rule: 'STOP LOSS = SACRÉ',          detail: 'Ne le déplace JAMAIS vers le bas' },
+    { n: 2, icon: '💰', rule: 'RISQUE MAX 1%',               detail: 'Si tu perds, c\'est $100 max sur $10,000 de capital' },
+    { n: 3, icon: '📊', rule: 'MAX 2 TRADES PAR JOUR',       detail: 'La qualité, pas la quantité' },
+    { n: 4, icon: '🎯', rule: 'R:R MINIMUM 2.5×',            detail: 'Ne prends que les trades qui rapportent 2.5× ton risque' },
+    { n: 5, icon: '🚫', rule: 'PAS DE REVENGE',              detail: 'Tu perds un trade ? C\'est fini pour la journée.' },
+    { n: 6, icon: '📅', rule: 'KILLZONE UNIQUEMENT',         detail: 'Trade SEULEMENT entre 14h30 et 16h30 CET' },
+    { n: 7, icon: '⚡', rule: 'SI "NO TRADE" → PAS DE TRADE', detail: 'Le dashboard a toujours raison' },
+  ];
+  var rulesSection = (
+    <div style={{ marginBottom: 20 }}>
+      <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 11, fontWeight: 700, letterSpacing: 2, textTransform: 'uppercase', padding: 0, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'JetBrains Mono' }}
+              onClick={function() { setRulesOpen(!rulesOpen); }}>
+        {rulesOpen ? '▼' : '▶'} 📌 LES 7 RÈGLES QUI TE PROTÈGENT
+      </button>
+      {rulesOpen && (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {RULES.map(function(r) {
+            return (
+              <div key={r.n} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#111827', border: '1px solid #1e293b', borderRadius: 6, padding: '10px 14px' }}>
+                <span style={{ fontSize: 20 }}>{r.icon}</span>
+                <div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{r.rule}</span>
+                  <span style={{ fontSize: 12, color: '#64748b', marginLeft: 8 }}>— {r.detail}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div style={sWrap}>
+      {eventBanner}
+      {verdictBlock}
+      {stepNav}
+      {stepContent}
+      {posSection}
+      {rulesSection}
+    </div>
+  );
+}
+
 var TABS = [
   { id: 'overview',  label: '📊 Vue d\'ensemble' },
+  { id: 'coach',     label: '🤝 Coach'           },
   { id: 'watchlist', label: '📈 Watchlist'        },
   { id: 'reddit',    label: '🔴 Reddit'           },
   { id: 'news',      label: '📰 News'             },
@@ -4659,6 +5197,7 @@ function TradingDashboard() {
 
       <main className="content">
         {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} tradesProgress={tradesProgress} />}
+        {tab === 'coach'     && <CoachTab data={data} posMonitor={posMonitor} scanResults={scanResults} scanLoading={scanLoading} onScan={loadScanUnified} onRefresh={handleRefresh} refreshLoading={loading} lastUpd={lastUpd} onGoToJournal={handleAddTradeFromSmc} />}
         {tab === 'watchlist' && <WatchlistTab data={data} />}
         {tab === 'reddit'    && <RedditTab data={data} discoveries={discoveries} discLoading={discLoading} onLoadDisc={loadDiscoveries} onAnalyzeTk={analyzeDiscovery} onAddTemp={addTempTicker} tempWatchlist={tempWatchlist} />}
         {tab === 'news'      && <NewsTab      data={data} />}
