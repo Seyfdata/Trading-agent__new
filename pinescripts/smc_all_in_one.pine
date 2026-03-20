@@ -1,154 +1,171 @@
 // ============================================================================
-// SMC-AI All-in-One — TradingView Pine Script v5
-// Compatible compte GRATUIT (1 seul indicateur = 1 slot)
-// Modules : BOS/CHoCH · Order Blocks · FVG · SMA200/50 · Levels · Tableau
+// SMC-AI All-in-One v3 — TradingView Pine Script v5
+// Compatible compte GRATUIT (1 indicateur · 1 alerte consolidée)
+// Modules : Mode Simple · BUY/SELL Signals · Trail Stop · OB · FVG · Panneau
 // ============================================================================
 //@version=5
-indicator("SMC-AI All-in-One", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+indicator("SMC-AI All-in-One", overlay=true,
+     max_boxes_count=200, max_lines_count=300, max_labels_count=200)
 
 
 // ============================================================================
-// ██████╗  █████╗ ██████╗  █████╗ ███╗   ███╗███████╗████████╗██████╗ ███████╗
-// ██╔══██╗██╔══██╗██╔══██╗██╔══██╗████╗ ████║██╔════╝╚══██╔══╝██╔══██╗██╔════╝
-// ██████╔╝███████║██████╔╝███████║██╔████╔██║█████╗     ██║   ██████╔╝█████╗
-// ██╔═══╝ ██╔══██║██╔══██╗██╔══██║██║╚██╔╝██║██╔══╝     ██║   ██╔══██╗██╔══╝
-// ██║     ██║  ██║██║  ██║██║  ██║██║ ╚═╝ ██║███████╗   ██║   ██║  ██║███████╗
-// ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝
+// ⚙️  PARAMÈTRES GÉNÉRAUX
 // ============================================================================
 
-// ── MODULE 1 PARAMS : Structure BOS / CHoCH ─────────────────────────────────
-show_structure  = input.bool(true,  "Structure BOS/CHoCH",  group="📈 Structure")
-swing_length    = input.int(5,      "Longueur du swing",    group="📈 Structure", minval=2, maxval=20)
-show_swing_lvls = input.bool(true,  "Lignes swing H/L",     group="📈 Structure")
+mode_simple = input.bool(true,  "🔰 Mode Simple (débutant)", group="⚙️ Général",
+     tooltip="Active: cache FVG, labels BOS/CHoCH, lignes swing. Garde l'essentiel propre.")
+show_table  = input.bool(true,  "Panneau récapitulatif (haut droite)", group="⚙️ Général")
 
-// ── MODULE 2 PARAMS : Order Blocks ──────────────────────────────────────────
-show_ob             = input.bool(true,                        "Order Blocks",   group="🟢 Order Blocks")
-show_mitigated_ob   = input.bool(false,                       "OB Mitigés",     group="🟢 Order Blocks")
-ob_bull_color       = input.color(color.new(color.teal, 80),  "Bull OB",        group="🟢 Order Blocks")
-ob_bear_color       = input.color(color.new(color.red,  80),  "Bear OB",        group="🟢 Order Blocks")
-ob_mitig_color      = input.color(color.new(color.gray, 88),  "OB Mitigé",      group="🟢 Order Blocks")
 
-// ── MODULE 3 PARAMS : Fair Value Gaps ───────────────────────────────────────
-show_fvg        = input.bool(true,                         "Fair Value Gaps",  group="📊 FVG")
-show_filled_fvg = input.bool(false,                        "FVG Comblés",      group="📊 FVG")
-fvg_bull_color  = input.color(color.new(color.green, 85),  "Bull FVG",         group="📊 FVG")
-fvg_bear_color  = input.color(color.new(color.red,   85),  "Bear FVG",         group="📊 FVG")
-min_fvg_atr     = input.float(0.1, "Taille min (× ATR)",   group="📊 FVG",     minval=0.0, step=0.05)
+// ============================================================================
+// 📈  STRUCTURE BOS / CHoCH
+// ============================================================================
 
-// ── MODULE 4 PARAMS : SMA + Discount/Premium ────────────────────────────────
-show_sma        = input.bool(true,             "SMA 200 + 50",          group="📏 Moyennes Mobiles")
-show_dp_zone    = input.bool(true,             "Zone Discount/Premium", group="📏 Moyennes Mobiles")
-sma_200_color   = input.color(color.orange,    "SMA 200",               group="📏 Moyennes Mobiles")
-sma_50_color    = input.color(color.blue,      "SMA 50",                group="📏 Moyennes Mobiles")
-dp_period       = input.int(20, "Période Discount/Premium", group="📏 Moyennes Mobiles", minval=5, maxval=100)
+show_structure  = input.bool(true, "Labels BOS/CHoCH",     group="📈 Structure")
+show_swing_lvls = input.bool(true, "Lignes swing High/Low", group="📈 Structure")
+swing_length    = input.int(5,     "Longueur du swing",     group="📈 Structure",
+     minval=2, maxval=20,
+     tooltip="5 = équilibre. Augmente pour signaux plus rares mais plus fiables.")
 
-// ── MODULE 5 PARAMS : Niveaux Entry / Stop / Target ─────────────────────────
+
+// ============================================================================
+// 🟢  ORDER BLOCKS
+// ============================================================================
+
+show_ob           = input.bool(true,                         "Order Blocks",  group="🟢 Order Blocks")
+show_mitigated_ob = input.bool(false,                        "OB Mitigés",    group="🟢 Order Blocks")
+ob_bull_color     = input.color(color.new(color.teal, 75),   "Bull OB",       group="🟢 Order Blocks")
+ob_bear_color     = input.color(color.new(color.red,  75),   "Bear OB",       group="🟢 Order Blocks")
+ob_mitig_color    = input.color(color.new(color.gray, 88),   "OB Mitigé",     group="🟢 Order Blocks")
+
+
+// ============================================================================
+// 📊  FAIR VALUE GAPS
+// ============================================================================
+
+show_fvg        = input.bool(true,                          "Fair Value Gaps", group="📊 FVG")
+show_filled_fvg = input.bool(false,                         "FVG Comblés",     group="📊 FVG")
+fvg_bull_color  = input.color(color.new(color.green, 85),   "Bull FVG",        group="📊 FVG")
+fvg_bear_color  = input.color(color.new(color.red,   85),   "Bear FVG",        group="📊 FVG")
+min_fvg_atr     = input.float(0.1, "Taille min (× ATR)",    group="📊 FVG",    minval=0.0, step=0.05)
+
+
+// ============================================================================
+// 📏  MOYENNES MOBILES + DISCOUNT / PREMIUM
+// ============================================================================
+
+show_sma      = input.bool(true,          "SMA 200 + 50",          group="📏 Moyennes Mobiles")
+show_dp_zone  = input.bool(true,          "Zone Discount/Premium", group="📏 Moyennes Mobiles")
+sma_200_color = input.color(color.orange, "SMA 200",               group="📏 Moyennes Mobiles")
+sma_50_color  = input.color(color.blue,   "SMA 50",                group="📏 Moyennes Mobiles")
+dp_period     = input.int(20, "Période range (jours)",             group="📏 Moyennes Mobiles",
+     minval=5, maxval=100)
+
+
+// ============================================================================
+// 🎯  NIVEAUX TRADE + TRAIL STOP
+// ============================================================================
+
 show_levels  = input.bool(true,  "Niveaux Entry/Stop/Target", group="🎯 Trade Levels")
 entry_price  = input.float(0.0,  "Entry Price",               group="🎯 Trade Levels")
 stop_price   = input.float(0.0,  "Stop Loss",                 group="🎯 Trade Levels")
 target_price = input.float(0.0,  "Take Profit",               group="🎯 Trade Levels")
+shares       = input.int(0,      "Nombre d'actions (PnL $)",  group="🎯 Trade Levels", minval=0)
+trail_active = input.bool(false, "📈 Activer Trail Stop",     group="🎯 Trade Levels",
+     tooltip="Affiche des niveaux de stop suggérés quand le trade est en profit. SUGGESTION uniquement — déplace le stop sur IBKR manuellement.")
 
-// ── MODULE 7 PARAMS : Tableau ────────────────────────────────────────────────
-show_table   = input.bool(true,  "Tableau récapitulatif",     group="📋 Tableau")
+
+// ============================================================================
+// 🔔  SIGNAUX
+// ============================================================================
+
+show_buy_signal  = input.bool(true,  "Signaux BUY (flèches vertes)",   group="🔔 Signaux")
+show_sell_signal = input.bool(true,  "Signaux SELL TARGET (flèches rouges)", group="🔔 Signaux")
+show_danger      = input.bool(true,  "Signaux DANGER (X rouges)",       group="🔔 Signaux")
 
 
 // ============================================================================
 // MODULE 1 — STRUCTURE DE MARCHÉ (BOS / CHoCH)
 // ============================================================================
 
-// Détecter pivots
+// Détection des pivots
 ph = ta.pivothigh(high, swing_length, swing_length)
 pl = ta.pivotlow(low,   swing_length, swing_length)
 
-// Mémoriser le dernier pivot
-var float last_ph       = na
-var int   last_ph_bar   = na
-var float last_pl       = na
-var int   last_pl_bar   = na
+var float last_ph = na
+var float last_pl = na
 
 if not na(ph)
-    last_ph     := ph
-    last_ph_bar := bar_index - swing_length
-
+    last_ph := ph
 if not na(pl)
-    last_pl     := pl
-    last_pl_bar := bar_index - swing_length
+    last_pl := pl
 
-// Biais courant et dernier BOS
-var int   market_bias    = 0   // +1 BULL, -1 BEAR, 0 NEUTRAL
-var int   prev_bias      = 0
+// Biais de marché courant
+var int   market_bias    = 0   // +1 BULL · -1 BEAR · 0 NEUTRAL
 var float last_bos_price = na
-var int   last_bos_bar   = na
 
-// Détecter BOS
-bos_bull = not na(last_ph) and ta.crossover(close, last_ph[0])
-bos_bear = not na(last_pl) and ta.crossunder(close, last_pl[0])
-
-// CHoCH = BOS dans la direction opposée au biais précédent
+bos_bull  = not na(last_ph) and ta.crossover(close,  last_ph[0])
+bos_bear  = not na(last_pl) and ta.crossunder(close, last_pl[0])
 choch_bull = bos_bull and market_bias == -1
 choch_bear = bos_bear and market_bias ==  1
 
 if bos_bull or bos_bear
-    prev_bias    := market_bias
-    market_bias  := bos_bull ? 1 : -1
+    market_bias    := bos_bull ? 1 : -1
     last_bos_price := bos_bull ? last_ph : last_pl
-    last_bos_bar   := bar_index
 
-// ── Dessiner labels structure ────────────────────────────────────────────────
-if show_structure
+// Labels BOS/CHoCH (masqués en mode simple)
+show_bos_labels = show_structure and not mode_simple
+if show_bos_labels
     if choch_bull
         label.new(bar_index, low - ta.atr(14) * 0.5, "CHoCH ⚠",
-             color=color.orange, textcolor=color.white, style=label.style_label_up, size=size.small)
+             color=color.orange, textcolor=color.white,
+             style=label.style_label_up, size=size.small)
     else if bos_bull
         label.new(bar_index, low - ta.atr(14) * 0.5, "BOS ▲",
-             color=color.new(color.teal, 20), textcolor=color.white, style=label.style_label_up, size=size.small)
-
+             color=color.new(color.teal, 20), textcolor=color.white,
+             style=label.style_label_up, size=size.small)
     if choch_bear
         label.new(bar_index, high + ta.atr(14) * 0.5, "CHoCH ⚠",
-             color=color.orange, textcolor=color.white, style=label.style_label_down, size=size.small)
+             color=color.orange, textcolor=color.white,
+             style=label.style_label_down, size=size.small)
     else if bos_bear
         label.new(bar_index, high + ta.atr(14) * 0.5, "BOS ▼",
-             color=color.new(color.red, 20), textcolor=color.white, style=label.style_label_down, size=size.small)
+             color=color.new(color.red, 20), textcolor=color.white,
+             style=label.style_label_down, size=size.small)
 
-// ── Lignes swing highs / lows ────────────────────────────────────────────────
-if show_swing_lvls
+// Lignes swing (masquées en mode simple)
+if show_swing_lvls and not mode_simple
     if not na(ph)
         line.new(bar_index - swing_length, ph, bar_index, ph,
-             color=color.new(color.red, 60), style=line.style_dotted, width=1)
+             color=color.new(color.red, 65), style=line.style_dotted, width=1)
     if not na(pl)
         line.new(bar_index - swing_length, pl, bar_index, pl,
-             color=color.new(color.teal, 60), style=line.style_dotted, width=1)
+             color=color.new(color.teal, 65), style=line.style_dotted, width=1)
 
 
 // ============================================================================
 // MODULE 2 — ORDER BLOCKS
 // ============================================================================
 
-// On ne crée un OB que sur les BOS confirmés
-// Bull OB = dernière bougie baissière avant le BOS bull
-// Bear OB = dernière bougie haussière avant le BOS bear
-
-var box[] ob_boxes  = array.new_box()
+var box[]  ob_boxes = array.new_box()
 var bool[] ob_mitig = array.new_bool()
-var bool[] ob_bull  = array.new_bool()   // true = bull OB, false = bear OB
+var bool[] ob_bull  = array.new_bool()
 
-// Chercher l'OB sur le bar du BOS
 if show_ob
     if bos_bull
-        // Chercher en arrière la dernière bougie baissière (close < open)
         ob_idx = 1
         for i = 1 to 10
             if close[i] < open[i]
                 ob_idx := i
                 break
-        ob_lo    = low[ob_idx]
-        ob_hi    = open[ob_idx]   // corps institutionnel (pas le wick)
+        ob_lo = low[ob_idx]
+        ob_hi = open[ob_idx]
         if ob_hi > ob_lo
-            b = box.new(bar_index - ob_idx, ob_hi, bar_index + 50, ob_lo,
-                 border_color=ob_bull_color, bgcolor=ob_bull_color,
-                 border_width=1, border_style=line.style_solid)
+            b = box.new(bar_index - ob_idx, ob_hi, bar_index + 60, ob_lo,
+                 border_color=color.new(color.teal, 30), bgcolor=ob_bull_color,
+                 border_width=2, border_style=line.style_solid)
             label.new(bar_index - ob_idx, ob_hi, " Bull OB",
-                 color=color.new(color.teal, 70), textcolor=color.teal,
+                 color=color.new(color.teal, 60), textcolor=color.teal,
                  style=label.style_label_right, size=size.tiny)
             array.push(ob_boxes, b)
             array.push(ob_mitig, false)
@@ -160,81 +177,91 @@ if show_ob
             if close[i] > open[i]
                 ob_idx := i
                 break
-        ob_lo    = open[ob_idx]
-        ob_hi    = high[ob_idx]
+        ob_lo = open[ob_idx]
+        ob_hi = high[ob_idx]
         if ob_hi > ob_lo
-            b = box.new(bar_index - ob_idx, ob_hi, bar_index + 50, ob_lo,
-                 border_color=ob_bear_color, bgcolor=ob_bear_color,
-                 border_width=1, border_style=line.style_solid)
+            b = box.new(bar_index - ob_idx, ob_hi, bar_index + 60, ob_lo,
+                 border_color=color.new(color.red, 30), bgcolor=ob_bear_color,
+                 border_width=2, border_style=line.style_solid)
             label.new(bar_index - ob_idx, ob_hi, " Bear OB",
-                 color=color.new(color.red, 70), textcolor=color.red,
+                 color=color.new(color.red, 60), textcolor=color.red,
                  style=label.style_label_right, size=size.tiny)
             array.push(ob_boxes, b)
             array.push(ob_mitig, false)
             array.push(ob_bull,  false)
 
-// Mitigation des OB (prix traverse le milieu)
+// Mitigation + détection contact (une seule boucle pour tout)
+touching_bull_ob = false
+near_bear_ob     = false
+
 if show_ob and array.size(ob_boxes) > 0
     for i = 0 to array.size(ob_boxes) - 1
         if not array.get(ob_mitig, i)
-            b      = array.get(ob_boxes, i)
+            b       = array.get(ob_boxes, i)
             is_bull = array.get(ob_bull, i)
             ob_top  = box.get_top(b)
             ob_bot  = box.get_bottom(b)
             mid     = (ob_top + ob_bot) / 2.0
-            // Mitigé si le prix traverse le milieu
-            mitigated = is_bull ? close < mid : close > mid
-            if mitigated
+
+            // Contact avec le prix actuel
+            if low <= ob_top and high >= ob_bot
+                if is_bull
+                    touching_bull_ob := true
+                else
+                    near_bear_ob := true
+
+            // Mitigation (traverse le milieu)
+            if is_bull ? close < mid : close > mid
                 array.set(ob_mitig, i, true)
                 if show_mitigated_ob
                     box.set_bgcolor(b, ob_mitig_color)
                     box.set_border_color(b, ob_mitig_color)
                 else
-                    box.set_right(b, bar_index)   // stopper l'extension
+                    box.set_right(b, bar_index)
 
 
 // ============================================================================
-// MODULE 3 — FAIR VALUE GAPS
+// MODULE 3 — FAIR VALUE GAPS (masqués en mode simple)
 // ============================================================================
 
 atr14 = ta.atr(14)
 
-// FVG Haussier : low[0] > high[2]  (gap entre C1.high et C3.low)
 fvg_bull_cond = low > high[2] and (low - high[2]) >= min_fvg_atr * atr14
-// FVG Baissier : high[0] < low[2]
 fvg_bear_cond = high < low[2] and (low[2] - high) >= min_fvg_atr * atr14
 
-var box[] fvg_boxes   = array.new_box()
-var bool[] fvg_filled = array.new_bool()
+var box[]  fvg_boxes   = array.new_box()
+var bool[] fvg_filled  = array.new_bool()
 var bool[] fvg_is_bull = array.new_bool()
 
-if show_fvg
+show_fvg_eff = show_fvg and not mode_simple
+
+if show_fvg_eff
     if fvg_bull_cond
-        b = box.new(bar_index - 2, low, bar_index + 50, high[2],
+        b = box.new(bar_index - 2, low, bar_index + 60, high[2],
              border_color=fvg_bull_color, bgcolor=fvg_bull_color,
              border_width=1, border_style=line.style_dotted)
         array.push(fvg_boxes, b)
         array.push(fvg_filled, false)
         array.push(fvg_is_bull, true)
-
     if fvg_bear_cond
-        b = box.new(bar_index - 2, low[2], bar_index + 50, high,
+        b = box.new(bar_index - 2, low[2], bar_index + 60, high,
              border_color=fvg_bear_color, bgcolor=fvg_bear_color,
              border_width=1, border_style=line.style_dotted)
         array.push(fvg_boxes, b)
         array.push(fvg_filled, false)
         array.push(fvg_is_bull, false)
 
-// Marquer les FVG comblés
-if show_fvg and array.size(fvg_boxes) > 0
+fvg_nearby = false
+if show_fvg_eff and array.size(fvg_boxes) > 0
     for i = 0 to array.size(fvg_boxes) - 1
         if not array.get(fvg_filled, i)
-            b        = array.get(fvg_boxes, i)
-            is_b     = array.get(fvg_is_bull, i)
-            fvg_top  = box.get_top(b)
-            fvg_bot  = box.get_bottom(b)
-            filled   = is_b ? close < fvg_bot : close > fvg_top
-            if filled
+            b       = array.get(fvg_boxes, i)
+            is_b    = array.get(fvg_is_bull, i)
+            fvg_top = box.get_top(b)
+            fvg_bot = box.get_bottom(b)
+            if low <= fvg_top and high >= fvg_bot
+                fvg_nearby := true
+            if is_b ? close < fvg_bot : close > fvg_top
                 array.set(fvg_filled, i, true)
                 if show_filled_fvg
                     box.set_bgcolor(b, color.new(color.gray, 92))
@@ -244,190 +271,379 @@ if show_fvg and array.size(fvg_boxes) > 0
 
 
 // ============================================================================
-// MODULE 4 — SMA200 + SMA50 + ZONE DISCOUNT / PREMIUM
+// MODULE 4 — SMA200 + SMA50 + DISCOUNT / PREMIUM
 // ============================================================================
 
 sma200 = ta.sma(close, 200)
 sma50  = ta.sma(close, 50)
 
-// Plot SMAs
-plot(show_sma ? sma200 : na, "SMA 200", color=sma_200_color, linewidth=2)
+// SMA200 épaisse (3), SMA50 fine (1)
+plot(show_sma ? sma200 : na, "SMA 200", color=sma_200_color, linewidth=3)
 plot(show_sma ? sma50  : na, "SMA 50",  color=sma_50_color,  linewidth=1)
 
-// Zone Discount / Premium — basée sur le range dp_period jours
+// Zone Discount / Premium basée sur le range dp_period jours
 h20   = ta.highest(high, dp_period)
 l20   = ta.lowest(low,   dp_period)
 mid20 = (h20 + l20) / 2.0
 
-// Colorier le fond selon la zone
-dp_bull_bg = color.new(color.teal,  96)
-dp_bear_bg = color.new(color.red,   96)
+in_discount = close < mid20
+in_premium  = close > mid20
 
-bgcolor(show_dp_zone ? (close < mid20 ? dp_bull_bg : dp_bear_bg) : na, title="Zone Discount/Premium")
-
-// Ligne midpoint pointillée
+bgcolor(show_dp_zone ? (in_discount ? color.new(color.teal, 96) : color.new(color.red, 96)) : na,
+     title="Zone Discount/Premium")
 plot(show_dp_zone ? mid20 : na, "Midpoint 50%",
      color=color.new(color.gray, 50), linewidth=1, style=plot.style_circles)
 
+// Tendance : SMA50 au-dessus de SMA200
+trend_bull = not na(sma50) and not na(sma200) and sma50 > sma200
+
+// SMA200 distance %
+sma200_dist_pct = not na(sma200) ? (close - sma200) / sma200 * 100 : na
+
+// Cassure de la SMA200 (prix passe dessous alors qu'il était dessus)
+sma200_cross_down = not na(sma200) and ta.crossunder(close, sma200)
+
 
 // ============================================================================
-// MODULE 5 — NIVEAUX ENTRY / STOP / TARGET
+// MODULE 5 — NIVEAUX ENTRY / STOP / TARGET + TRAIL STOP
 // ============================================================================
 
-// R:R calculé
-rr_val = (entry_price > 0 and stop_price > 0 and target_price > 0 and entry_price != stop_price)
-         ? math.abs(target_price - entry_price) / math.abs(entry_price - stop_price)
+// Calculs de base
+risk_per_share = (entry_price > 0 and stop_price > 0)
+                 ? math.abs(entry_price - stop_price)
+                 : 0.0
+
+rr_val = (entry_price > 0 and stop_price > 0 and target_price > 0 and risk_per_share > 0)
+         ? math.abs(target_price - entry_price) / risk_per_share
          : 0.0
 
-// Lignes horizontales persistantes via hline (plus stable que line.new)
-// Note : hline nécessite des valeurs constantes — on utilise plot + fill pour les zones
+// Niveaux de trail stop (en prix)
+trail_1r_price   = entry_price > 0 and risk_per_share > 0 ? entry_price                     : 0.0  // breakeven
+trail_1_5r_price = entry_price > 0 and risk_per_share > 0 ? entry_price + 0.5 * risk_per_share : 0.0
+trail_2r_price   = entry_price > 0 and risk_per_share > 0 ? entry_price + 1.0 * risk_per_share : 0.0
 
-entry_line  = show_levels and entry_price  > 0 ? entry_price  : na
-stop_line   = show_levels and stop_price   > 0 ? stop_price   : na
-target_line = show_levels and target_price > 0 ? target_price : na
+// Seuils de déclenchement du trail (prix doit dépasser ces niveaux)
+hit_1r   = entry_price > 0 and risk_per_share > 0 and high >= entry_price + 1.0 * risk_per_share
+hit_1_5r = entry_price > 0 and risk_per_share > 0 and high >= entry_price + 1.5 * risk_per_share
+hit_2r   = entry_price > 0 and risk_per_share > 0 and high >= entry_price + 2.0 * risk_per_share
 
-p_entry  = plot(entry_line,  "Entry",  color=color.blue,  linewidth=2, style=plot.style_linebr)
-p_stop   = plot(stop_line,   "Stop",   color=color.red,   linewidth=2, style=plot.style_linebr)
-p_target = plot(target_line, "Target", color=color.green, linewidth=2, style=plot.style_linebr)
+// Plots Entry/Stop/Target
+entry_plot_val  = show_levels and entry_price  > 0 ? entry_price  : na
+stop_plot_val   = show_levels and stop_price   > 0 ? stop_price   : na
+target_plot_val = show_levels and target_price > 0 ? target_price : na
 
-// Zones colorées entre les niveaux
-fill(p_entry, p_stop,   color=show_levels ? color.new(color.red,   92) : na, title="Zone risque")
-fill(p_entry, p_target, color=show_levels ? color.new(color.green, 92) : na, title="Zone gain")
+p_entry  = plot(entry_plot_val,  "Entry",  color=color.new(color.blue,  0), linewidth=2, style=plot.style_linebr)
+p_stop   = plot(stop_plot_val,   "Stop",   color=color.new(color.red,   0), linewidth=2, style=plot.style_linebr)
+p_target = plot(target_plot_val, "Target", color=color.new(color.green, 0), linewidth=2, style=plot.style_linebr)
 
-// Labels sur les niveaux (une seule fois sur la dernière barre)
+fill(p_entry, p_stop,   color=show_levels ? color.new(color.red,   90) : na, title="Zone risque")
+fill(p_entry, p_target, color=show_levels ? color.new(color.green, 90) : na, title="Zone gain")
+
+// Labels niveaux (dernière barre uniquement)
 if show_levels and barstate.islast
     if entry_price > 0
         label.new(bar_index + 2, entry_price,
              "ENTRY  $" + str.tostring(entry_price, "#.##"),
-             color=color.new(color.blue, 20), textcolor=color.white,
+             color=color.new(color.blue, 15), textcolor=color.white,
              style=label.style_label_left, size=size.small)
     if stop_price > 0
-        label.new(bar_index + 2, stop_price,
-             "STOP   $" + str.tostring(stop_price, "#.##"),
-             color=color.new(color.red, 20), textcolor=color.white,
+        stop_lbl = "STOP   $" + str.tostring(stop_price, "#.##")
+        if shares > 0 and entry_price > 0
+            stop_lbl += "  (-$" + str.tostring(math.round(risk_per_share * shares), "#") + ")"
+        label.new(bar_index + 2, stop_price, stop_lbl,
+             color=color.new(color.red, 15), textcolor=color.white,
              style=label.style_label_left, size=size.small)
     if target_price > 0
-        label.new(bar_index + 2, target_price,
-             "TARGET $" + str.tostring(target_price, "#.##"),
-             color=color.new(color.green, 20), textcolor=color.white,
+        tgt_lbl = "TARGET $" + str.tostring(target_price, "#.##")
+        if shares > 0 and entry_price > 0
+            gain_usd = math.abs(target_price - entry_price) * shares
+            tgt_lbl += "  (+$" + str.tostring(math.round(gain_usd), "#") + ")"
+        label.new(bar_index + 2, target_price, tgt_lbl,
+             color=color.new(color.green, 15), textcolor=color.white,
              style=label.style_label_left, size=size.small)
     if rr_val > 0
-        rr_color = rr_val >= 2.5 ? color.new(color.teal, 20) : color.new(color.orange, 20)
-        label.new(bar_index + 2, (entry_price + target_price) / 2,
-             "R:R  " + str.tostring(rr_val, "#.##") + "×",
-             color=rr_color, textcolor=color.white,
-             style=label.style_label_left, size=size.normal)
+        rr_clr = rr_val >= 2.5 ? color.new(color.teal, 15) : color.new(color.orange, 15)
+        rr_lbl = "R:R  " + str.tostring(rr_val, "#.##") + "x"
+        if shares > 0 and risk_per_share > 0
+            loss_usd = risk_per_share * shares
+            gain_usd = math.abs(target_price - entry_price) * shares
+            rr_lbl += "   Risque: -$" + str.tostring(math.round(loss_usd), "#")
+                    + " | Gain: +$" + str.tostring(math.round(gain_usd), "#")
+        label.new(bar_index + 2, (entry_price + target_price) / 2.0, rr_lbl,
+             color=rr_clr, textcolor=color.white,
+             style=label.style_label_left, size=size.small)
+
+// Trail Stop — lignes jaunes pointillées + labels (uniquement quand trail_active)
+var bool trail_1r_drawn   = false
+var bool trail_1_5r_drawn = false
+var bool trail_2r_drawn   = false
+
+if trail_active and entry_price > 0 and risk_per_share > 0
+    // +1R atteint → stop au breakeven
+    if hit_1r and not trail_1r_drawn
+        trail_1r_drawn := true
+        line.new(bar_index - 5, trail_1r_price, bar_index + 40, trail_1r_price,
+             color=color.yellow, style=line.style_dashed, width=2)
+        label.new(bar_index, trail_1r_price,
+             "📈 +1R — Monte ton stop au breakeven ($" + str.tostring(trail_1r_price, "#.##") + ")\nSuggestion — modifie sur IBKR",
+             color=color.new(color.yellow, 20), textcolor=color.black,
+             style=label.style_label_left, size=size.small)
+
+    // +1.5R atteint → stop à +0.5R
+    if hit_1_5r and not trail_1_5r_drawn
+        trail_1_5r_drawn := true
+        line.new(bar_index - 5, trail_1_5r_price, bar_index + 40, trail_1_5r_price,
+             color=color.yellow, style=line.style_dashed, width=2)
+        label.new(bar_index, trail_1_5r_price,
+             "📈 +1.5R — Stop suggéré: $" + str.tostring(trail_1_5r_price, "#.##") + " (+0.5R sécurisé)\nSuggestion — modifie sur IBKR",
+             color=color.new(color.yellow, 20), textcolor=color.black,
+             style=label.style_label_left, size=size.small)
+
+    // +2R atteint → stop à +1R
+    if hit_2r and not trail_2r_drawn
+        trail_2r_drawn := true
+        line.new(bar_index - 5, trail_2r_price, bar_index + 40, trail_2r_price,
+             color=color.yellow, style=line.style_dashed, width=2)
+        label.new(bar_index, trail_2r_price,
+             "📈 +2R — Stop suggéré: $" + str.tostring(trail_2r_price, "#.##") + " (+1R sécurisé)\nSuggestion — modifie sur IBKR",
+             color=color.new(color.yellow, 20), textcolor=color.black,
+             style=label.style_label_left, size=size.small)
+
+// Réinitialiser les flags trail si le trade est clôturé (entry remise à 0)
+if entry_price == 0
+    trail_1r_drawn   := false
+    trail_1_5r_drawn := false
+    trail_2r_drawn   := false
 
 
 // ============================================================================
-// MODULE 6 — ALERTES
+// MODULE 6 — SIGNAUX BUY / SELL TARGET / SELL DANGER
 // ============================================================================
 
-// Distance à SMA200
-sma200_dist_pct = not na(sma200) ? math.abs(close - sma200) / sma200 * 100 : na
+// ── Signal BUY ──────────────────────────────────────────────────────────────
+// Conditions : discount + Bull OB touché + SMA50>SMA200 + bougie verte
+buy_signal = in_discount
+             and touching_bull_ob
+             and trend_bull
+             and close > open
 
-// Vérifier si le prix touche un OB Bull non mitigé
-touching_bull_ob = false
-if array.size(ob_boxes) > 0
-    for i = 0 to array.size(ob_boxes) - 1
-        if array.get(ob_bull, i) and not array.get(ob_mitig, i)
-            b      = array.get(ob_boxes, i)
-            ob_top = box.get_top(b)
-            ob_bot = box.get_bottom(b)
-            if low <= ob_top and high >= ob_bot
-                touching_bull_ob := true
+// ── Signal SELL TARGET ──────────────────────────────────────────────────────
+// Condition : prix atteint ou dépasse le target
+sell_target = show_levels and target_price > 0 and high >= target_price
 
-// Conditions d'alertes
-alert_bos_bull   = bos_bull    and show_structure
-alert_bos_bear   = bos_bear    and show_structure
-alert_choch      = (choch_bull or choch_bear) and show_structure
-alert_sma200     = not na(sma200_dist_pct) and sma200_dist_pct < 0.5 and show_sma
-alert_ob_touch   = touching_bull_ob and show_ob
-alert_entry_hit  = show_levels and entry_price > 0 and low <= entry_price and high >= entry_price
-alert_stop_hit   = show_levels and stop_price  > 0 and low <= stop_price
-alert_target_hit = show_levels and target_price > 0 and high >= target_price
+// ── Signal SELL DANGER ──────────────────────────────────────────────────────
+// Conditions (une seule suffit) :
+// a) Cassure de la SMA200 vers le bas (perte de support majeur)
+// b) CHoCH baissier (retournement de tendance)
+// c) Prix dans un Bear OB avec volume élevé (>1.5x)
+vol_avg20   = ta.sma(volume, 20)
+vol_ratio   = not na(vol_avg20) and vol_avg20 > 0 ? volume / vol_avg20 : 1.0
+high_volume = vol_ratio >= 1.5
 
-alertcondition(alert_bos_bull,   "BOS Haussier",           "BOS ▲ détecté — structure haussière confirmée")
-alertcondition(alert_bos_bear,   "BOS Baissier",           "BOS ▼ détecté — structure baissière confirmée")
-alertcondition(alert_choch,      "CHoCH",                  "CHoCH ⚠ détecté — possible retournement de tendance")
-alertcondition(alert_sma200,     "Prix proche SMA200",     "Prix à moins de 0.5% de la SMA200 — rebond potentiel")
-alertcondition(alert_ob_touch,   "Prix dans un Bull OB",   "Le prix touche un Order Block haussier non mitigé")
-alertcondition(alert_entry_hit,  "Prix sur Entry",         "Le prix a atteint ton niveau d'entrée")
-alertcondition(alert_stop_hit,   "Stop Loss touché",       "🛑 Stop Loss atteint — clôture recommandée")
-alertcondition(alert_target_hit, "Target atteint",         "🎯 Take Profit atteint — clôture recommandée")
+sell_danger = (sma200_cross_down)
+              or (choch_bear)
+              or (near_bear_ob and high_volume)
+
+// ── Signal ATTENTION (résistance) ───────────────────────────────────────────
+warn_signal = near_bear_ob or in_premium
+
+// ── Plotshapes ───────────────────────────────────────────────────────────────
+plotshape(show_buy_signal  ? buy_signal  : na,
+     title="Signal BUY", location=location.belowbar,
+     style=shape.triangleup, color=color.new(color.lime, 0),
+     size=size.large, text="BUY")
+
+plotshape(show_sell_signal ? sell_target : na,
+     title="Signal TARGET", location=location.abovebar,
+     style=shape.triangledown, color=color.new(color.green, 10),
+     size=size.large, text="TARGET")
+
+plotshape(show_danger ? sell_danger : na,
+     title="Signal DANGER", location=location.belowbar,
+     style=shape.xcross, color=color.new(color.red, 0),
+     size=size.large, text="DANGER")
+
+plotshape(warn_signal and not buy_signal and not sell_danger,
+     title="Signal Attention", location=location.abovebar,
+     style=shape.triangledown, color=color.new(color.orange, 0),
+     size=size.normal, text="⚠")
+
+// Labels contextuels sur les signaux
+if buy_signal and show_buy_signal
+    label.new(bar_index, low - atr14 * 1.2,
+         "🟢 BUY\n$" + str.tostring(close, "#.##"),
+         color=color.new(color.lime, 20), textcolor=color.white,
+         style=label.style_label_up, size=size.small)
+
+if sell_target and show_sell_signal
+    label.new(bar_index, high + atr14 * 0.5,
+         "🎯 TARGET ATTEINT\n$" + str.tostring(close, "#.##") + "\nVends sur IBKR",
+         color=color.new(color.green, 15), textcolor=color.white,
+         style=label.style_label_down, size=size.small)
+
+if sell_danger and show_danger
+    danger_reason = sma200_cross_down ? "SMA200 cassée" : choch_bear ? "CHoCH baissier" : "Bear OB + volume"
+    label.new(bar_index, low - atr14 * 1.5,
+         "⚠️ DANGER\n" + danger_reason + "\nEnvisage de sortir",
+         color=color.new(color.red, 20), textcolor=color.white,
+         style=label.style_label_up, size=size.small)
 
 
 // ============================================================================
-// MODULE 7 — TABLEAU RÉCAPITULATIF
+// MODULE 7 — PANNEAU RÉCAPITULATIF (9 lignes + PnL dynamique)
 // ============================================================================
 
-// Volume moyen 20 barres
-vol_avg20  = ta.sma(volume, 20)
-vol_ratio  = not na(vol_avg20) and vol_avg20 > 0 ? volume / vol_avg20 : 1.0
-vol_label  = vol_ratio >= 2.0 ? "🔥 ÉLEVÉ ×" + str.tostring(vol_ratio, "#.#")
-             : vol_ratio >= 1.5 ? "↑ " + str.tostring(vol_ratio, "#.#") + "×"
-             : "Normal"
+// Tendance
+trend_str = trend_bull ? "🟢 BULL"    : "🔴 BEAR"
+trend_clr = trend_bull ? color.teal   : color.red
 
-// Zone actuelle
-zone_str   = close < mid20 ? "DISCOUNT" : "PREMIUM"
-zone_color = close < mid20 ? color.teal  : color.red
+// Zone
+zone_str  = in_discount ? "🟢 DISCOUNT" : in_premium ? "🔴 PREMIUM" : "🟡 NEUTRE"
+zone_clr  = in_discount ? color.teal    : in_premium ? color.red     : color.yellow
 
-// Biais
-bias_str   = market_bias ==  1 ? "BULL" : market_bias == -1 ? "BEAR" : "NEUTRAL"
-bias_color = market_bias ==  1 ? color.teal : market_bias == -1 ? color.red : color.gray
+// SMA200
+sma_str   = not na(sma200_dist_pct)
+            ? (sma200_dist_pct >= 0 ? "+" : "") + str.tostring(sma200_dist_pct, "#.##") + "%"
+            : "N/A"
+sma_clr   = not na(sma200_dist_pct) ? (sma200_dist_pct >= 0 ? color.teal : color.red) : color.gray
 
-// Distance SMA200
-sma200_pct_str = not na(sma200_dist_pct)
-                 ? (close >= sma200 ? "+" : "-") + str.tostring(sma200_dist_pct, "#.##") + "%"
-                 : "N/A"
+// Volume
+vol_str   = vol_ratio >= 2.0 ? "🔥 x" + str.tostring(vol_ratio, "#.#")
+            : vol_ratio >= 1.5 ? "↑ x" + str.tostring(vol_ratio, "#.#")
+            : "Normal"
+vol_clr   = vol_ratio >= 2.0 ? color.orange : color.gray
 
-// Dernier BOS
-bos_str = not na(last_bos_price)
-          ? "$" + str.tostring(last_bos_price, "#.##")
-          : "—"
+// OB / FVG
+ob_str    = touching_bull_ob ? "✅ Bull OB" : near_bear_ob ? "⚠ Bear OB" : "❌ NON"
+ob_clr    = touching_bull_ob ? color.teal : near_bear_ob ? color.orange : color.gray
+fvg_str   = fvg_nearby ? "✅ OUI" : "❌ NON"
+fvg_clr   = fvg_nearby ? color.teal : color.gray
 
-// Tableau
-var table t = table.new(position.top_right, 2, 6,
-     bgcolor=color.new(color.black, 75),
+// Signal courant
+signal_str = buy_signal ? "🟢 BUY actif"
+             : sell_target ? "🎯 TARGET atteint"
+             : sell_danger ? "🔴 SELL DANGER"
+             : warn_signal ? "⚠️ Résistance"
+             : "⚪ Aucun"
+signal_clr = buy_signal ? color.lime
+             : sell_target ? color.green
+             : sell_danger ? color.red
+             : warn_signal ? color.orange
+             : color.gray
+
+// Trail (affiche le niveau suggéré actif le plus récent)
+trail_str = ""
+trail_clr = color.yellow
+if trail_active and entry_price > 0
+    trail_str := hit_2r ? "📈 +2R — Stop $" + str.tostring(trail_2r_price, "#.##")
+                 : hit_1_5r ? "📈 +1.5R — Stop $" + str.tostring(trail_1_5r_price, "#.##")
+                 : hit_1r ? "📈 +1R — Breakeven"
+                 : "En attente de +1R"
+
+// PnL dynamique (si entry renseigné et position ouverte)
+pnl_str = ""
+pnl_clr = color.gray
+if entry_price > 0 and shares > 0
+    cur_pnl_usd = (close - entry_price) * shares
+    cur_r       = risk_per_share > 0 ? (close - entry_price) / risk_per_share : 0.0
+    pnl_prefix  = cur_pnl_usd >= 0 ? "+" : ""
+    pnl_str     := pnl_prefix + "$" + str.tostring(math.round(cur_pnl_usd), "#")
+                 + " (" + pnl_prefix + str.tostring(cur_r, "#.##") + "R)"
+    pnl_clr     := cur_pnl_usd >= 0 ? color.teal : color.red
+
+// VERDICT
+verdict_buy  = in_discount and trend_bull and touching_bull_ob
+verdict_wait = in_premium or not trend_bull
+verdict_str  = verdict_buy  ? "🟢 ACHETER SI SIGNAL"
+               : verdict_wait ? "🔴 ATTENDRE"
+               : "⚪ NEUTRE"
+verdict_clr  = verdict_buy  ? color.teal
+               : verdict_wait ? color.red
+               : color.gray
+
+// Nombre de lignes : base 9 + 1 si trail + 1 si pnl
+row_count = 9 + (trail_active and entry_price > 0 ? 1 : 0) + (entry_price > 0 and shares > 0 ? 1 : 0)
+
+var table panel = table.new(position.top_right, 2, 11,
+     bgcolor=color.new(color.black, 80),
      border_color=color.new(color.gray, 60), border_width=1,
      frame_color=color.new(color.gray, 40), frame_width=1)
 
 if show_table and barstate.islast
-    // En-tête
-    table.cell(t, 0, 0, "SMC-AI",
-         bgcolor=color.new(color.navy, 30), text_color=color.white,
+    // Ligne 0 : En-tête
+    table.cell(panel, 0, 0, "SMC-AI",
+         bgcolor=color.new(color.navy, 20), text_color=color.white,
+         text_size=size.normal, text_halign=text.align_center)
+    table.cell(panel, 1, 0, syminfo.ticker,
+         bgcolor=color.new(color.navy, 20), text_color=color.silver,
          text_size=size.small, text_halign=text.align_center)
-    table.cell(t, 1, 0, "Dashboard",
-         bgcolor=color.new(color.navy, 30), text_color=color.gray,
-         text_size=size.tiny,  text_halign=text.align_center)
-
-    // Biais
-    table.cell(t, 0, 1, "Biais",
+    // Ligne 1 : Signal courant (en haut = prioritaire)
+    table.cell(panel, 0, 1, "Signal",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(t, 1, 1, bias_str,
-         text_color=bias_color, text_size=size.small, text_halign=text.align_center)
-
-    // Zone
-    table.cell(t, 0, 2, "Zone",
+    table.cell(panel, 1, 1, signal_str,
+         text_color=signal_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 2 : Tendance
+    table.cell(panel, 0, 2, "Tendance",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(t, 1, 2, zone_str,
-         text_color=zone_color, text_size=size.small, text_halign=text.align_center)
-
-    // Dernier BOS
-    table.cell(t, 0, 3, "Dernier BOS",
+    table.cell(panel, 1, 2, trend_str,
+         text_color=trend_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 3 : Zone
+    table.cell(panel, 0, 3, "Zone",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(t, 1, 3, bos_str,
-         text_color=color.white, text_size=size.tiny, text_halign=text.align_center)
-
-    // SMA200
-    table.cell(t, 0, 4, "SMA200 dist.",
+    table.cell(panel, 1, 3, zone_str,
+         text_color=zone_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 4 : SMA200
+    table.cell(panel, 0, 4, "SMA200",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(t, 1, 4, sma200_pct_str,
-         text_color=color.new(color.orange, 10), text_size=size.tiny, text_halign=text.align_center)
-
-    // Volume
-    table.cell(t, 0, 5, "Volume",
+    table.cell(panel, 1, 4, sma_str,
+         text_color=sma_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 5 : Volume
+    table.cell(panel, 0, 5, "Volume",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(t, 1, 5, vol_label,
-         text_color=vol_ratio >= 2.0 ? color.orange : color.white,
-         text_size=size.tiny, text_halign=text.align_center)
+    table.cell(panel, 1, 5, vol_str,
+         text_color=vol_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 6 : OB proche
+    table.cell(panel, 0, 6, "OB proche",
+         text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(panel, 1, 6, ob_str,
+         text_color=ob_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 7 : FVG proche
+    table.cell(panel, 0, 7, "FVG proche",
+         text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(panel, 1, 7, fvg_str,
+         text_color=fvg_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 8 : PnL dynamique (si trade actif)
+    table.cell(panel, 0, 8, entry_price > 0 and shares > 0 ? "PnL" : "",
+         text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(panel, 1, 8, pnl_str,
+         text_color=pnl_clr, text_size=size.small, text_halign=text.align_left)
+    // Ligne 9 : Trail
+    table.cell(panel, 0, 9, trail_active and entry_price > 0 ? "Trail" : "",
+         text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
+    table.cell(panel, 1, 9, trail_str,
+         text_color=trail_clr, text_size=size.tiny, text_halign=text.align_left)
+    // Ligne 10 : VERDICT (toujours en bas)
+    table.cell(panel, 0, 10, "VERDICT",
+         text_color=color.white, text_size=size.small, text_halign=text.align_right)
+    table.cell(panel, 1, 10, verdict_str,
+         text_color=verdict_clr, text_size=size.normal, text_halign=text.align_left)
+
+
+// ============================================================================
+// MODULE 8 — ALERTE CONSOLIDÉE UNIQUE
+// Compatible compte TradingView GRATUIT (1 seule alerte)
+// ============================================================================
+
+// Trail triggers (une seule fois chacun)
+trail_1r_alert   = trail_active and hit_1r   and not hit_1r[1]
+trail_1_5r_alert = trail_active and hit_1_5r and not hit_1_5r[1]
+trail_2r_alert   = trail_active and hit_2r   and not hit_2r[1]
+
+// Alerte unique — couvre TOUS les événements
+alertcondition(
+     buy_signal or sell_target or sell_danger
+     or trail_1r_alert or trail_1_5r_alert or trail_2r_alert
+     or bos_bull or bos_bear
+     or (not na(sma200_dist_pct) and math.abs(sma200_dist_pct) < 0.5),
+     "SMC-AI Signal",
+     "SMC-AI : Signal sur {{ticker}} ({{interval}}) — vérifie le graphique")
