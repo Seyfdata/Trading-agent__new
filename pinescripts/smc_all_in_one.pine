@@ -363,8 +363,7 @@ if show_levels and barstate.islast
         if shares > 0 and risk_per_share > 0
             loss_usd = risk_per_share * shares
             gain_usd = math.abs(target_price - entry_price) * shares
-            rr_lbl += "   Risque: -$" + str.tostring(math.round(loss_usd), "#")
-                    + " | Gain: +$" + str.tostring(math.round(gain_usd), "#")
+            rr_lbl += "   Risque: -$" + str.tostring(math.round(loss_usd), "#") + " | Gain: +$" + str.tostring(math.round(gain_usd), "#")
         label.new(bar_index + 2, (entry_price + target_price) / 2.0, rr_lbl,
              color=rr_clr, textcolor=color.white,
              style=label.style_label_left, size=size.small)
@@ -559,8 +558,7 @@ if entry_price > 0 and shares > 0
     cur_pnl_usd = (close - entry_price) * shares
     cur_r       = risk_per_share > 0 ? (close - entry_price) / risk_per_share : 0.0
     pnl_prefix  = cur_pnl_usd >= 0 ? "+" : ""
-    pnl_str     := pnl_prefix + "$" + str.tostring(math.round(cur_pnl_usd), "#")
-                 + " (" + pnl_prefix + str.tostring(cur_r, "#.##") + "R)"
+    pnl_str     := pnl_prefix + "$" + str.tostring(math.round(cur_pnl_usd), "#") + " (" + pnl_prefix + str.tostring(cur_r, "#.##") + "R)"
     pnl_clr     := cur_pnl_usd >= 0 ? color.teal : color.red
 
 // VERDICT
