@@ -28,7 +28,7 @@ start_year    = input.int(2023,  "Année de début",        minval=2020, maxval=
 
 
 // ============================================================================
-// 📏  CALCULS DE BASE
+// 📏  CALCULS DE BASE — tous au niveau global (hors de tout if/for)
 // ============================================================================
 
 sma200    = ta.sma(close, 200)
@@ -44,11 +44,15 @@ midpoint      = (range_high_20 + range_low_20) / 2.0
 is_discount = close < midpoint
 is_uptrend  = not na(sma50) and not na(sma200) and sma50 > sma200
 
-// Volume ratio
+// Volume ratio — ternaire sur une seule ligne
 vol_ratio = not na(vol_avg20) and vol_avg20 > 0 ? volume / vol_avg20 : 1.0
 
 // Filtre date
 in_date_range = year >= start_year
+
+// Croisements SMA200 — calculés UNE FOIS au niveau global (jamais dans un if)
+cross_above_sma200 = ta.crossover(close,  sma200)
+cross_below_sma200 = ta.crossunder(close, sma200)
 
 
 // ============================================================================
@@ -66,9 +70,10 @@ if not na(ph)
 if not na(pl)
     last_swing_low := pl
 
-// BOS simplifié pour la stratégie
-bos_bull_strat = not na(last_swing_high) and ta.crossover(close, last_swing_high[0])
-bos_bear_strat = not na(last_swing_low)  and ta.crossunder(close, last_swing_low[0])
+// BOS simplifié — ta.crossover/ta.crossunder au niveau global, jamais dans un if
+// On compare close avec la valeur courante du swing (pas avec series historique)
+bos_bull_strat = not na(last_swing_high) and close > last_swing_high and close[1] <= last_swing_high[1]
+bos_bear_strat = not na(last_swing_low)  and close < last_swing_low  and close[1] >= last_swing_low[1]
 
 var int strat_bias = 0
 if bos_bull_strat
@@ -78,27 +83,24 @@ if bos_bear_strat
 
 
 // ============================================================================
-// 🟢  ORDER BLOCKS SIMPLIFIÉS (pour signal de confluence)
+// 🟢  ORDER BLOCKS SIMPLIFIÉS (signal de confluence)
 // ============================================================================
-// Bull OB = dernière bougie baissière avant un mouvement haussier > 2% en 3 bougies
 
 // Détecter un mouvement haussier fort sur les 3 dernières bougies
 strong_bull_move = (close - close[3]) / close[3] > 0.02
 
-// Chercher le Bull OB : dernière bougie baissière dans les 10 bougies précédant le mouvement
 var float ob_bull_top = na
 var float ob_bull_bot = na
 
 if strong_bull_move
     for i = 1 to 10
-        if close[i] < open[i]   // bougie baissière
+        if close[i] < open[i]
             ob_bull_top := open[i]
             ob_bull_bot := low[i]
             break
 
 // OB mitigé si le prix est descendu dans la zone
 ob_mitigated = not na(ob_bull_bot) and close < ob_bull_bot
-
 if ob_mitigated
     ob_bull_top := na
     ob_bull_bot := na
@@ -111,43 +113,32 @@ in_bull_ob = not na(ob_bull_top) and not na(ob_bull_bot) and low <= ob_bull_top 
 // 🎯  LOGIQUE DES 3 STRATÉGIES
 // ============================================================================
 
-// ── Calcul Entry / Stop / Target pour chaque stratégie ──────────────────────
-
-// DISCOUNT_ZONE
+// ── DISCOUNT_ZONE ──────────────────────────────────────────────────────────
 dz_cond   = is_discount and is_uptrend and close > sma200 and vol_ratio >= 0.8
 dz_entry  = close
 dz_stop   = math.min(low, ta.lowest(low, 5)) * 0.995
 dz_target = dz_entry + rr_target * (dz_entry - dz_stop)
 dz_risk   = dz_entry - dz_stop
 
-// SMA200_BOUNCE
-sma_cond   = is_uptrend and not na(sma200)
-             and low     <= sma200 * 1.02
-             and close   >  sma200
-             and low[1]  >  sma200 * 0.98   // pas déjà cassé
+// ── SMA200_BOUNCE ──────────────────────────────────────────────────────────
+sma_cond   = is_uptrend and not na(sma200) and low <= sma200 * 1.02 and close > sma200 and low[1] > sma200 * 0.98
 sma_entry  = close
 sma_stop   = sma200 * 0.985
 sma_target = sma_entry + rr_target * (sma_entry - sma_stop)
 sma_risk   = sma_entry - sma_stop
 
-// VOLUME_MOMENTUM
-mom_cond   = vol_ratio >= 2.0
-             and close > open
-             and (close - open) / open > 0.015
-             and close > sma50
-             and close < sma200 * 1.15
+// ── VOLUME_MOMENTUM ────────────────────────────────────────────────────────
+mom_cond   = vol_ratio >= 2.0 and close > open and (close - open) / open > 0.015 and close > sma50 and close < sma200 * 1.15
 mom_entry  = close
 mom_stop   = low * 0.995
 mom_target = mom_entry + rr_target * (mom_entry - mom_stop)
 mom_risk   = mom_entry - mom_stop
 
-// ── Sélection de la stratégie active ─────────────────────────────────────────
-use_dz  = strat_choice == "Discount Zone"    or strat_choice == "Les 3"
-use_sma = strat_choice == "SMA200 Bounce"    or strat_choice == "Les 3"
-use_mom = strat_choice == "Volume Momentum"  or strat_choice == "Les 3"
+// ── Sélection stratégie + filtres qualité ────────────────────────────────
+use_dz  = strat_choice == "Discount Zone"   or strat_choice == "Les 3"
+use_sma = strat_choice == "SMA200 Bounce"   or strat_choice == "Les 3"
+use_mom = strat_choice == "Volume Momentum" or strat_choice == "Les 3"
 
-// ── Filtres de qualité communs ────────────────────────────────────────────────
-// Evite les stops trop serrés (< 0.3× ATR = bruit de marché)
 dz_valid  = dz_risk  >= atr14 * 0.3 and dz_risk  > 0
 sma_valid = sma_risk >= atr14 * 0.3 and sma_risk > 0
 mom_valid = mom_risk >= atr14 * 0.3 and mom_risk > 0
@@ -159,13 +150,12 @@ mom_valid = mom_risk >= atr14 * 0.3 and mom_risk > 0
 
 no_position = strategy.position_size == 0
 
-// Variables pour tracer les visuels
-var string last_signal = ""
-var float  entry_level = na
-var float  stop_level  = na
+var string last_signal  = ""
+var float  entry_level  = na
+var float  stop_level   = na
 var float  target_level = na
 
-// DISCOUNT_ZONE entry
+// DISCOUNT_ZONE
 if use_dz and dz_cond and dz_valid and no_position and in_date_range
     qty = math.floor(strategy.equity * (risk_pct / 100) / dz_risk)
     if qty > 0
@@ -176,7 +166,7 @@ if use_dz and dz_cond and dz_valid and no_position and in_date_range
         stop_level   := dz_stop
         target_level := dz_target
 
-// SMA200_BOUNCE entry
+// SMA200_BOUNCE
 if use_sma and sma_cond and sma_valid and no_position and in_date_range
     qty = math.floor(strategy.equity * (risk_pct / 100) / sma_risk)
     if qty > 0
@@ -187,7 +177,7 @@ if use_sma and sma_cond and sma_valid and no_position and in_date_range
         stop_level   := sma_stop
         target_level := sma_target
 
-// VOLUME_MOMENTUM entry
+// VOLUME_MOMENTUM
 if use_mom and mom_cond and mom_valid and no_position and in_date_range
     qty = math.floor(strategy.equity * (risk_pct / 100) / mom_risk)
     if qty > 0
@@ -198,7 +188,7 @@ if use_mom and mom_cond and mom_valid and no_position and in_date_range
         stop_level   := mom_stop
         target_level := mom_target
 
-// ── Time exit : sortir si en position depuis plus de max_hold_days bougies ──
+// Time exit : sortir après max_hold_days bougies
 if strategy.position_size > 0 and strategy.opentrades > 0
     bars_in_trade = bar_index - strategy.opentrades.entry_bar_index(0)
     if bars_in_trade >= max_hold_days
@@ -209,28 +199,41 @@ if strategy.position_size > 0 and strategy.opentrades > 0
 // 🎨  VISUELS SUR LE CHART
 // ============================================================================
 
-// SMA200 et SMA50
-plot(sma200, "SMA 200", color=color.orange, linewidth=3)
-plot(sma50,  "SMA 50",  color=color.blue,   linewidth=1)
-plot(midpoint, "Midpoint", color=color.new(color.gray, 60), linewidth=1, style=plot.style_circles)
+// SMAs
+plot(sma200,    "SMA 200",   color=color.orange,                     linewidth=3)
+plot(sma50,     "SMA 50",    color=color.blue,                       linewidth=1)
+plot(midpoint,  "Midpoint",  color=color.new(color.gray, 60),        linewidth=1, style=plot.style_circles)
 
-// Fond Discount / Premium
+// Fond Discount / Premium — ternaire sur une seule ligne
 bgcolor(is_discount ? color.new(color.teal, 96) : color.new(color.red, 96), title="Zone D/P")
 
-// Fond pendant une position ouverte (vert si profit, rouge si perte)
-in_trade    = strategy.position_size > 0
-trade_entry = strategy.opentrades > 0 ? strategy.opentrades.entry_price(0) : na
-trade_pnl   = not na(trade_entry) ? (close - trade_entry) / trade_entry : 0.0
-trade_color = in_trade ? (trade_pnl >= 0 ? color.new(color.green, 93) : color.new(color.red, 93)) : na
-bgcolor(trade_color, title="Trade actif")
+// Fond pendant une position ouverte
+in_trade     = strategy.position_size > 0
+trade_entry_ = strategy.opentrades > 0 ? strategy.opentrades.entry_price(0) : na
+trade_pnl    = not na(trade_entry_) ? (close - trade_entry_) / trade_entry_ : 0.0
 
-// Flèches et labels d'entrée
+// Couleur trade : extraire dans une variable pour éviter ternaire imbriqué dans bgcolor
+var color trade_bg = na
+if in_trade
+    trade_bg := trade_pnl >= 0 ? color.new(color.green, 93) : color.new(color.red, 93)
+else
+    trade_bg := na
+bgcolor(trade_bg, title="Trade actif")
+
+// Label d'entrée
 entry_dz  = use_dz  and dz_cond  and dz_valid  and no_position and in_date_range
 entry_sma = use_sma and sma_cond and sma_valid and no_position and in_date_range
 entry_mom = use_mom and mom_cond and mom_valid and no_position and in_date_range
 any_entry = entry_dz or entry_sma or entry_mom
 
-entry_label = entry_dz ? "DZ" : entry_sma ? "SMA" : entry_mom ? "MOM" : ""
+// Déterminer le label type — if/else au lieu de ternaire chaîné
+var string entry_lbl = ""
+if entry_dz
+    entry_lbl := "DZ"
+else if entry_sma
+    entry_lbl := "SMA"
+else if entry_mom
+    entry_lbl := "MOM"
 
 plotshape(any_entry, title="Entry", location=location.belowbar,
      style=shape.triangleup, color=color.new(color.lime, 0),
@@ -238,34 +241,45 @@ plotshape(any_entry, title="Entry", location=location.belowbar,
 
 if any_entry
     label.new(bar_index, low - atr14 * 1.0,
-         "▲ BUY\n" + entry_label + "\n$" + str.tostring(close, "#.##"),
+         "▲ BUY\n" + entry_lbl + "\n$" + str.tostring(close, "#.##"),
          color=color.new(color.lime, 20), textcolor=color.white,
          style=label.style_label_up, size=size.small)
 
-// Flèche de sortie (détection de clôture de trade)
+// Sortie de trade
 was_in_trade = strategy.position_size[1] > 0 and strategy.position_size == 0
-last_trade_profit = strategy.closedtrades > 0
-                    ? strategy.closedtrades.profit(strategy.closedtrades - 1)
-                    : 0.0
 
-exit_color = last_trade_profit >= 0 ? color.new(color.green, 0) : color.new(color.red, 0)
-exit_label_text = last_trade_profit >= 0
-                  ? "✅ WIN\n+" + str.tostring(math.round(last_trade_profit), "#") + "$"
-                  : "❌ LOSS\n" + str.tostring(math.round(last_trade_profit), "#") + "$"
+// Profit du dernier trade clôturé — if/else au lieu de ternaire multi-ligne
+last_profit = 0.0
+if strategy.closedtrades > 0
+    last_profit := strategy.closedtrades.profit(strategy.closedtrades - 1)
+
+// Couleur et texte de sortie — if/else
+var color  exit_clr = color.green
+var string exit_txt = ""
+if last_profit >= 0
+    exit_clr := color.new(color.green, 0)
+    exit_txt := "WIN\n+" + str.tostring(math.round(last_profit), "#") + "$"
+else
+    exit_clr := color.new(color.red, 0)
+    exit_txt := "LOSS\n" + str.tostring(math.round(last_profit), "#") + "$"
 
 plotshape(was_in_trade, title="Exit", location=location.abovebar,
-     style=shape.triangledown, color=exit_color,
+     style=shape.triangledown, color=exit_clr,
      size=size.normal, text="")
 
 if was_in_trade
-    label.new(bar_index, high + atr14 * 0.5, exit_label_text,
-         color=color.new(exit_color, 20), textcolor=color.white,
+    label.new(bar_index, high + atr14 * 0.5, exit_txt,
+         color=color.new(exit_clr, 20), textcolor=color.white,
          style=label.style_label_down, size=size.small)
 
-// Niveaux de la dernière entrée (plots persistants)
-p_entry  = plot(in_trade and not na(entry_level)  ? entry_level  : na, "Entry",  color=color.blue,  linewidth=1, style=plot.style_linebr)
-p_stop   = plot(in_trade and not na(stop_level)   ? stop_level   : na, "Stop",   color=color.red,   linewidth=1, style=plot.style_linebr)
-p_target = plot(in_trade and not na(target_level) ? target_level : na, "Target", color=color.green, linewidth=1, style=plot.style_linebr)
+// Niveaux Entry/Stop/Target — extraire dans des variables avant plot()
+entry_plot_val  = in_trade and not na(entry_level)  ? entry_level  : na
+stop_plot_val   = in_trade and not na(stop_level)   ? stop_level   : na
+target_plot_val = in_trade and not na(target_level) ? target_level : na
+
+p_entry  = plot(entry_plot_val,  "Entry",  color=color.blue,  linewidth=1, style=plot.style_linebr)
+p_stop   = plot(stop_plot_val,   "Stop",   color=color.red,   linewidth=1, style=plot.style_linebr)
+p_target = plot(target_plot_val, "Target", color=color.green, linewidth=1, style=plot.style_linebr)
 
 fill(p_entry, p_stop,   color=in_trade ? color.new(color.red,   88) : na)
 fill(p_entry, p_target, color=in_trade ? color.new(color.green, 88) : na)
@@ -275,25 +289,55 @@ fill(p_entry, p_target, color=in_trade ? color.new(color.green, 88) : na)
 // 📋  TABLEAU DE RÉSULTATS (haut gauche)
 // ============================================================================
 
-// Calcul du Profit Factor
-gross_profit = strategy.grossprofit
-gross_loss   = math.abs(strategy.grossloss)
-profit_factor = gross_loss > 0 ? gross_profit / gross_loss : gross_profit > 0 ? 999.0 : 0.0
-
-// Winrate
+gross_profit  = strategy.grossprofit
+gross_loss    = math.abs(strategy.grossloss)
 total_trades  = strategy.closedtrades
 win_trades    = strategy.wintrades
 loss_trades   = strategy.losstrades
-winrate_pct   = total_trades > 0 ? win_trades / total_trades * 100 : 0.0
+net_pnl       = strategy.netprofit
+max_dd        = strategy.max_drawdown
 
-// Net PnL et Drawdown (natifs)
-net_pnl    = strategy.netprofit
-max_dd     = strategy.max_drawdown
+// Profit Factor — if/else pour éviter ternaire imbriqué sur plusieurs lignes
+profit_factor = 0.0
+if gross_loss > 0
+    profit_factor := gross_profit / gross_loss
+else if gross_profit > 0
+    profit_factor := 999.0
 
-// Couleurs
-pnl_clr  = net_pnl  >= 0 ? color.teal : color.red
-pf_clr   = profit_factor >= 1.3 ? color.teal : profit_factor >= 1.0 ? color.orange : color.red
-wr_clr   = winrate_pct  >= 50   ? color.teal : winrate_pct  >= 40   ? color.orange : color.red
+// Winrate — ternaire simple sur une ligne
+winrate_pct = total_trades > 0 ? win_trades / total_trades * 100.0 : 0.0
+
+// Net PnL % — ternaire simple sur une ligne
+net_pnl_pct = strategy.initial_capital > 0 ? net_pnl / strategy.initial_capital * 100.0 : 0.0
+
+// Couleurs — ternaires simples sur une ligne chacun
+pnl_clr = net_pnl       >= 0   ? color.teal   : color.red
+pf_clr  = profit_factor >= 1.3 ? color.teal   : profit_factor >= 1.0 ? color.orange : color.red
+wr_clr  = winrate_pct   >= 50  ? color.teal   : winrate_pct   >= 40  ? color.orange : color.red
+
+// Chaînes formatées — if/else pour les multi-lignes
+pnl_sign     = net_pnl     >= 0 ? "+" : ""
+pnl_pct_sign = net_pnl_pct >= 0 ? "+" : ""
+
+// Profit Factor texte — if/else
+var string pf_str = ""
+if profit_factor < 900
+    pf_str := str.tostring(profit_factor, "#.##")
+else
+    pf_str := "inf"
+
+// Verdict — if/else au lieu de ternaire multi-ligne
+var string verdict     = ""
+var color  verdict_clr = color.gray
+if profit_factor >= 1.3 and winrate_pct >= 40
+    verdict     := "VALIDE"
+    verdict_clr := color.teal
+else if profit_factor >= 1.0
+    verdict     := "PASSABLE"
+    verdict_clr := color.orange
+else
+    verdict     := "NON RENTABLE"
+    verdict_clr := color.red
 
 var table results = table.new(position.top_left, 2, 9,
      bgcolor=color.new(color.black, 80),
@@ -301,7 +345,6 @@ var table results = table.new(position.top_left, 2, 9,
      frame_color=color.new(color.gray, 40), frame_width=1)
 
 if barstate.islast
-    // En-tête
     table.cell(results, 0, 0, "SMC-AI BACKTEST",
          bgcolor=color.new(color.navy, 20), text_color=color.white,
          text_size=size.small, text_halign=text.align_center)
@@ -309,59 +352,42 @@ if barstate.islast
          bgcolor=color.new(color.navy, 20), text_color=color.silver,
          text_size=size.tiny, text_halign=text.align_center)
 
-    // Stratégie + capital initial
     table.cell(results, 0, 1, "Capital",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(results, 1, 1, "$" + str.tostring(strategy.initial_capital, "#,###"),
+    table.cell(results, 1, 1, "$" + str.tostring(strategy.initial_capital, "#"),
          text_color=color.white, text_size=size.tiny, text_halign=text.align_left)
 
-    // Trades
     table.cell(results, 0, 2, "Trades",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
     table.cell(results, 1, 2, str.tostring(total_trades)
-         + "  (W:" + str.tostring(win_trades) + " L:" + str.tostring(loss_trades) + ")",
+         + "  W:" + str.tostring(win_trades) + " L:" + str.tostring(loss_trades),
          text_color=color.white, text_size=size.tiny, text_halign=text.align_left)
 
-    // Winrate
     table.cell(results, 0, 3, "Winrate",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
     table.cell(results, 1, 3, str.tostring(winrate_pct, "#.#") + "%",
          text_color=wr_clr, text_size=size.small, text_halign=text.align_left)
 
-    // Profit Factor
     table.cell(results, 0, 4, "Profit Factor",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(results, 1, 4, profit_factor < 900 ? str.tostring(profit_factor, "#.##") : "∞",
+    table.cell(results, 1, 4, pf_str,
          text_color=pf_clr, text_size=size.small, text_halign=text.align_left)
 
-    // Net PnL
     table.cell(results, 0, 5, "Net PnL",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(results, 1, 5, (net_pnl >= 0 ? "+" : "") + "$" + str.tostring(math.round(net_pnl), "#,###"),
+    table.cell(results, 1, 5, pnl_sign + "$" + str.tostring(math.round(net_pnl), "#"),
          text_color=pnl_clr, text_size=size.small, text_halign=text.align_left)
 
-    // Net PnL %
-    net_pnl_pct = strategy.initial_capital > 0 ? net_pnl / strategy.initial_capital * 100 : 0.0
     table.cell(results, 0, 6, "Rdt %",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(results, 1, 6, (net_pnl_pct >= 0 ? "+" : "") + str.tostring(net_pnl_pct, "#.#") + "%",
+    table.cell(results, 1, 6, pnl_pct_sign + str.tostring(net_pnl_pct, "#.#") + "%",
          text_color=pnl_clr, text_size=size.small, text_halign=text.align_left)
 
-    // Max Drawdown
     table.cell(results, 0, 7, "Max DD",
          text_color=color.gray, text_size=size.tiny, text_halign=text.align_right)
-    table.cell(results, 1, 7, "-$" + str.tostring(math.round(max_dd), "#,###"),
+    table.cell(results, 1, 7, "-$" + str.tostring(math.round(max_dd), "#"),
          text_color=color.red, text_size=size.small, text_halign=text.align_left)
 
-    // Verdict
-    verdict = profit_factor >= 1.3 and winrate_pct >= 40
-              ? "✅ VALIDE"
-              : profit_factor >= 1.0
-              ? "⚠️ PASSABLE"
-              : "❌ NON RENTABLE"
-    verdict_clr = profit_factor >= 1.3 and winrate_pct >= 40 ? color.teal
-                  : profit_factor >= 1.0 ? color.orange
-                  : color.red
     table.cell(results, 0, 8, "Verdict",
          text_color=color.white, text_size=size.tiny, text_halign=text.align_right)
     table.cell(results, 1, 8, verdict,

@@ -309,13 +309,9 @@ sma200_cross_down = not na(sma200) and ta.crossunder(close, sma200)
 // ============================================================================
 
 // Calculs de base
-risk_per_share = (entry_price > 0 and stop_price > 0)
-                 ? math.abs(entry_price - stop_price)
-                 : 0.0
+risk_per_share = entry_price > 0 and stop_price > 0 ? math.abs(entry_price - stop_price) : 0.0
 
-rr_val = (entry_price > 0 and stop_price > 0 and target_price > 0 and risk_per_share > 0)
-         ? math.abs(target_price - entry_price) / risk_per_share
-         : 0.0
+rr_val = entry_price > 0 and stop_price > 0 and target_price > 0 and risk_per_share > 0 ? math.abs(target_price - entry_price) / risk_per_share : 0.0
 
 // Niveaux de trail stop (en prix)
 trail_1r_price   = entry_price > 0 and risk_per_share > 0 ? entry_price                     : 0.0  // breakeven
@@ -502,16 +498,21 @@ zone_str  = in_discount ? "🟢 DISCOUNT" : in_premium ? "🔴 PREMIUM" : "🟡 
 zone_clr  = in_discount ? color.teal    : in_premium ? color.red     : color.yellow
 
 // SMA200
-sma_str   = not na(sma200_dist_pct)
-            ? (sma200_dist_pct >= 0 ? "+" : "") + str.tostring(sma200_dist_pct, "#.##") + "%"
-            : "N/A"
-sma_clr   = not na(sma200_dist_pct) ? (sma200_dist_pct >= 0 ? color.teal : color.red) : color.gray
+var string sma_str = "N/A"
+var color  sma_clr = color.gray
+if not na(sma200_dist_pct)
+    sma_str := (sma200_dist_pct >= 0 ? "+" : "") + str.tostring(sma200_dist_pct, "#.##") + "%"
+    sma_clr := sma200_dist_pct >= 0 ? color.teal : color.red
 
 // Volume
-vol_str   = vol_ratio >= 2.0 ? "🔥 x" + str.tostring(vol_ratio, "#.#")
-            : vol_ratio >= 1.5 ? "↑ x" + str.tostring(vol_ratio, "#.#")
-            : "Normal"
-vol_clr   = vol_ratio >= 2.0 ? color.orange : color.gray
+var string vol_str = "Normal"
+if vol_ratio >= 2.0
+    vol_str := "🔥 x" + str.tostring(vol_ratio, "#.#")
+else if vol_ratio >= 1.5
+    vol_str := "↑ x" + str.tostring(vol_ratio, "#.#")
+else
+    vol_str := "Normal"
+vol_clr = vol_ratio >= 2.0 ? color.orange : color.gray
 
 // OB / FVG
 ob_str    = touching_bull_ob ? "✅ Bull OB" : near_bear_ob ? "⚠ Bear OB" : "❌ NON"
@@ -520,25 +521,36 @@ fvg_str   = fvg_nearby ? "✅ OUI" : "❌ NON"
 fvg_clr   = fvg_nearby ? color.teal : color.gray
 
 // Signal courant
-signal_str = buy_signal ? "🟢 BUY actif"
-             : sell_target ? "🎯 TARGET atteint"
-             : sell_danger ? "🔴 SELL DANGER"
-             : warn_signal ? "⚠️ Résistance"
-             : "⚪ Aucun"
-signal_clr = buy_signal ? color.lime
-             : sell_target ? color.green
-             : sell_danger ? color.red
-             : warn_signal ? color.orange
-             : color.gray
+var string signal_str = "⚪ Aucun"
+var color  signal_clr = color.gray
+if buy_signal
+    signal_str := "🟢 BUY actif"
+    signal_clr := color.lime
+else if sell_target
+    signal_str := "🎯 TARGET atteint"
+    signal_clr := color.green
+else if sell_danger
+    signal_str := "🔴 SELL DANGER"
+    signal_clr := color.red
+else if warn_signal
+    signal_str := "⚠️ Résistance"
+    signal_clr := color.orange
+else
+    signal_str := "⚪ Aucun"
+    signal_clr := color.gray
 
 // Trail (affiche le niveau suggéré actif le plus récent)
 trail_str = ""
 trail_clr = color.yellow
 if trail_active and entry_price > 0
-    trail_str := hit_2r ? "📈 +2R — Stop $" + str.tostring(trail_2r_price, "#.##")
-                 : hit_1_5r ? "📈 +1.5R — Stop $" + str.tostring(trail_1_5r_price, "#.##")
-                 : hit_1r ? "📈 +1R — Breakeven"
-                 : "En attente de +1R"
+    if hit_2r
+        trail_str := "📈 +2R — Stop $" + str.tostring(trail_2r_price, "#.##")
+    else if hit_1_5r
+        trail_str := "📈 +1.5R — Stop $" + str.tostring(trail_1_5r_price, "#.##")
+    else if hit_1r
+        trail_str := "📈 +1R — Breakeven"
+    else
+        trail_str := "En attente de +1R"
 
 // PnL dynamique (si entry renseigné et position ouverte)
 pnl_str = ""
@@ -554,12 +566,17 @@ if entry_price > 0 and shares > 0
 // VERDICT
 verdict_buy  = in_discount and trend_bull and touching_bull_ob
 verdict_wait = in_premium or not trend_bull
-verdict_str  = verdict_buy  ? "🟢 ACHETER SI SIGNAL"
-               : verdict_wait ? "🔴 ATTENDRE"
-               : "⚪ NEUTRE"
-verdict_clr  = verdict_buy  ? color.teal
-               : verdict_wait ? color.red
-               : color.gray
+var string verdict_str = "⚪ NEUTRE"
+var color  verdict_clr = color.gray
+if verdict_buy
+    verdict_str := "🟢 ACHETER SI SIGNAL"
+    verdict_clr := color.teal
+else if verdict_wait
+    verdict_str := "🔴 ATTENDRE"
+    verdict_clr := color.red
+else
+    verdict_str := "⚪ NEUTRE"
+    verdict_clr := color.gray
 
 // Nombre de lignes : base 9 + 1 si trail + 1 si pnl
 row_count = 9 + (trail_active and entry_price > 0 ? 1 : 0) + (entry_price > 0 and shares > 0 ? 1 : 0)
