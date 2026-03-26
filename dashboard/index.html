@@ -128,6 +128,16 @@
     .load-dot { display: inline-block; animation: ld .8s linear infinite; } @keyframes ld { to { transform: rotate(360deg); } }
     @media (max-width: 900px) { .g5 { grid-template-columns: repeat(3,1fr); } .g3,.g2 { grid-template-columns: 1fr; } }
     @media (max-width: 600px) { .g5 { grid-template-columns: repeat(2,1fr); } .content { padding: 12px; } }
+    /* Design v2 — lisibilité améliorée */
+    body { line-height: 1.6; }
+    .card { border-radius: 12px; padding: 20px; box-shadow: 0 4px 24px rgba(0,0,0,.3); }
+    .tab { font-size: 13px; padding: 11px 18px; }
+    .badge { padding: 4px 10px; font-size: 10px; }
+    .content { padding: 22px 28px; }
+    /* Modal Pine Config */
+    @keyframes fade-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+    .pine-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .pine-modal { background: #111827; border: 2px solid #3b82f6; border-radius: 14px; padding: 28px; max-width: 520px; width: 100%; animation: fade-in .18s ease; box-shadow: 0 20px 60px rgba(0,0,0,.6); }
     /* Position monitor progress bar */
     .pos-bar { height: 6px; border-radius: 3px; position: relative; margin: 6px 0 2px; overflow: visible; }
     .pos-marker { position: absolute; top: -4px; width: 3px; height: 14px; border-radius: 2px; box-shadow: 0 0 5px rgba(255,255,255,.4); transform: translateX(-50%); }
@@ -2191,6 +2201,10 @@ function SmcTab(props) {
   var selectedTicker = selState[0];
   var setSelectedTicker = selState[1];
 
+  var smcPineState = useState(null);
+  var smcPineModal = smcPineState[0];
+  var setSmcPineModal = smcPineState[1];
+
   useEffect(function() {
     if (!smcData[selectedTicker]) { onAnalyze(selectedTicker); }
   }, []);
@@ -2407,8 +2421,14 @@ function SmcTab(props) {
                   </div>
                 );
               })()}
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button className="btn btn-p" onClick={handleAddTradeUnified}>📝 Enregistrer ce trade</button>
+                {ud.best_entry != null && (
+                  <button className="btn" style={{ borderColor: '#3b82f6', color: '#3b82f6' }}
+                          onClick={function() { setSmcPineModal({ ticker: selectedTicker, best_entry: ud.best_entry, best_stop: ud.best_stop, best_target: ud.best_target }); }}>
+                    📋 Config TradingView
+                  </button>
+                )}
                 <a href={'https://www.tradingview.com/chart/?symbol=' + selectedTicker} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}><button className="btn">📈 TradingView</button></a>
               </div>
             </div>
@@ -2767,6 +2787,7 @@ function SmcTab(props) {
           <div className="mc" style={{ fontSize: 11, padding: '8px 0' }}>Cliquez sur "🎯 Scanner Top 5" pour analyser les meilleurs tickers</div>
         )}
       </div>
+      {smcPineModal && <PineConfigModal setup={smcPineModal} shares={null} onClose={function() { setSmcPineModal(null); }} />}
     </div>
   );
 }
@@ -2791,6 +2812,7 @@ function SetupsTab(props) {
   var setupsLoading = props.setupsLoading;
   var onScan        = props.onScan || function() {};
   var setups        = (setupsData && setupsData.setups) || [];
+  var sps = useState(null); var setupsPineModal = sps[0]; var setSetupsPineModal = sps[1];
 
   return (
     <div>
@@ -2909,18 +2931,30 @@ function SetupsTab(props) {
                 )}
 
                 {/* Raisons */}
-                <div>
+                <div style={{ marginBottom: 10 }}>
                   {(s.reasons || []).map(function(r, ri) {
                     return (
                       <div key={ri} className="mc" style={{ fontSize: 11, marginBottom: 3 }}>• {r}</div>
                     );
                   })}
                 </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn" style={{ borderColor: '#3b82f6', color: '#3b82f6', fontSize: 10, padding: '3px 10px' }}
+                    onClick={function() { setSetupsPineModal({ ticker: s.ticker, best_entry: s.entry, best_stop: s.stop, best_target: s.target }); }}>
+                    📋 Config TradingView
+                  </button>
+                  <a href={'https://www.tradingview.com/chart/?symbol=' + s.ticker} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                    <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }}>📈 Chart</button>
+                  </a>
+                </div>
               </div>
             );
           })}
         </div>
       )}
+      {setupsPineModal && <PineConfigModal setup={setupsPineModal} shares={null} onClose={function() { setSetupsPineModal(null); }} />}
     </div>
   );
 }
@@ -4221,6 +4255,106 @@ Refresh:  click 🔄 to update all data (takes ~15s)`}</pre>
   );
 }
 
+// ── Pine Config Modal ──────────────────────────────────────────────────────
+
+function generatePineConfig(setup, shares) {
+  var ticker = setup.ticker || '???';
+  var entry  = setup.best_entry  ? Number(setup.best_entry).toFixed(2)  : '—';
+  var stop   = setup.best_stop   ? Number(setup.best_stop).toFixed(2)   : '—';
+  var target = setup.best_target ? Number(setup.best_target).toFixed(2) : '—';
+  var sh     = shares || '?';
+  return (
+    '📋 CONFIGURATION TRADINGVIEW — ' + ticker + '\n' +
+    '\n' +
+    'Dans les paramètres de SMC-AI All-in-One :\n' +
+    '⚙️  Clic droit sur l\'indicateur → Paramètres\n' +
+    '\n' +
+    '🎯 Trade Levels :\n' +
+    '   Entry Price  :  ' + entry  + '\n' +
+    '   Stop Loss    :  ' + stop   + '\n' +
+    '   Take Profit  :  ' + target + '\n' +
+    '   Nb actions   :  ' + sh     + '\n' +
+    '   Trail Stop   :  Activé\n' +
+    '\n' +
+    'Vérifie que tu vois :\n' +
+    '• Ligne bleue à $'  + entry  + ' (entry)\n' +
+    '• Ligne rouge à $'  + stop   + ' (stop)\n' +
+    '• Ligne verte à $'  + target + ' (target)\n' +
+    '• Zone rouge entre stop et entry (risque)\n' +
+    '• Zone verte entre entry et target (gain)'
+  );
+}
+
+function PineConfigModal(props) {
+  var setup   = props.setup;
+  var shares  = props.shares;
+  var onClose = props.onClose;
+
+  var copiedState = useState(false);
+  var copied      = copiedState[0];
+  var setCopied   = copiedState[1];
+
+  if (!setup) return null;
+
+  var ticker  = setup.ticker || '???';
+  var entry   = setup.best_entry  ? Number(setup.best_entry).toFixed(2)  : '—';
+  var stop    = setup.best_stop   ? Number(setup.best_stop).toFixed(2)   : '—';
+  var target  = setup.best_target ? Number(setup.best_target).toFixed(2) : '—';
+  var sh      = shares || '?';
+  var tvUrl   = 'https://www.tradingview.com/chart/?symbol=NASDAQ:' + ticker;
+
+  function handleCopy() {
+    var brief = ticker + ' | Entry: ' + entry + ' | Stop: ' + stop + ' | Target: ' + target + ' | Shares: ' + sh;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(brief).then(function() {
+        setCopied(true);
+        setTimeout(function() { setCopied(false); }, 2000);
+      });
+    }
+  }
+
+  var sRow = { marginBottom: 10, display: 'flex', gap: 10 };
+  var sKey = { color: '#64748b', fontSize: 13, width: 100, flexShrink: 0 };
+  var sVal = { color: '#f1f5f9', fontSize: 14, fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' };
+
+  return (
+    <div className="pine-overlay" onClick={function(e) { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="pine-modal">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#3b82f6' }}>📋 Config TradingView — {ticker}</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+          Dans les paramètres de <strong style={{ color: '#f1f5f9' }}>SMC-AI All-in-One</strong> → groupe <strong style={{ color: '#f1f5f9' }}>🎯 Trade Levels</strong> :
+        </div>
+        <div style={{ background: '#0a0e17', borderRadius: 8, padding: '16px 18px', marginBottom: 20, border: '1px solid #1e293b' }}>
+          <div style={sRow}><span style={sKey}>Entry Price</span><span style={Object.assign({}, sVal, { color: '#3b82f6' })}>${entry}</span></div>
+          <div style={sRow}><span style={sKey}>Stop Loss</span><span style={Object.assign({}, sVal, { color: '#ef4444' })}>${stop}</span></div>
+          <div style={sRow}><span style={sKey}>Take Profit</span><span style={Object.assign({}, sVal, { color: '#10b981' })}>${target}</span></div>
+          <div style={sRow}><span style={sKey}>Nb actions</span><span style={sVal}>{sh}</span></div>
+          <div style={Object.assign({}, sRow, { marginBottom: 0 })}><span style={sKey}>Trail Stop</span><span style={Object.assign({}, sVal, { color: '#10b981' })}>✅ Activé</span></div>
+        </div>
+        <div style={{ fontSize: 11, color: '#475569', marginBottom: 18, lineHeight: 1.7 }}>
+          Après avoir entré ces valeurs, tu verras :<br/>
+          • Ligne bleue à ${entry} · Ligne rouge à ${stop} · Ligne verte à ${target}<br/>
+          • Zones colorées risque/gain · R:R et PnL calculés automatiquement
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            onClick={handleCopy}
+            style={{ padding: '10px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 13, background: copied ? '#10b981' : '#3b82f6', color: '#fff', transition: 'background .2s' }}>
+            {copied ? '✅ Copié !' : '📋 Copier les valeurs'}
+          </button>
+          <a href={tvUrl} target="_blank" rel="noopener noreferrer"
+             style={{ padding: '10px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontFamily: 'JetBrains Mono', fontWeight: 700, fontSize: 13, background: '#10b981', color: '#fff', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}>
+            📈 Ouvrir TradingView
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Coach Tab ──────────────────────────────────────────────────────────────
 
 function CoachTab(props) {
@@ -4258,6 +4392,10 @@ function CoachTab(props) {
   var tvCheckState     = useState([false, false, false, false, false]);
   var tvChecks         = tvCheckState[0];
   var setTvChecks      = tvCheckState[1];
+
+  var pineModalState   = useState(null);  // null or setup object
+  var pineModal        = pineModalState[0];
+  var setPineModal     = pineModalState[1];
 
   // ── Derived data ──────────────────────────────────────────────────────────
   var market       = data.market || {};
@@ -4318,24 +4456,27 @@ function CoachTab(props) {
     return { dots: dots, clr: clr, txt: txt, n: n };
   }
 
-  // Human-friendly reasons (amélioration 2)
-  function buildReasons(setup) {
-    var reasons = [];
+  // Short keyword tags for reasons (v2)
+  function buildTags(setup) {
+    var tags = [];
     var smc  = setup.smc_analysis || {};
     var bd   = setup.scoring_breakdown || {};
     var opts = setup.options_data || {};
     var sigs = setup.setup_detector_signals || [];
 
-    if (smc.bias === 'BULL')              reasons.push('La tendance générale est à la hausse — on est dans le bon sens');
-    if (smc.zone === 'DISCOUNT')          reasons.push('Le prix est en zone de soldes — on achète pas cher');
-    if (bd.ob_present > 0)                reasons.push('Les gros investisseurs ont acheté dans cette zone avant — zone de support forte');
-    if (bd.fvg_present > 0)               reasons.push('Il y a un déséquilibre de prix ici — le marché veut revenir à l\'équilibre');
-    if (opts.direction === 'BULLISH')      reasons.push('Les données d\'options montrent que les pros parient à la hausse');
-    if (sigs.indexOf('SMA200_BOUNCE') >= 0) reasons.push('Le prix rebondit sur sa ligne de support (moyenne 200 jours)');
-    if (sigs.indexOf('VOLUME_MOMENTUM') >= 0) reasons.push('Gros volume d\'achat — les institutions bougent');
-    if (smc.confluences && smc.confluences.strong) reasons.push('Plusieurs signaux convergent — c\'est un setup solide');
-    if (reasons.length === 0)              reasons.push('Score de confluence élevé (' + (setup.unified_score || 0).toFixed(1) + '/10)');
-    return reasons.slice(0, 4);
+    var pos = [], neg = [];
+    if (smc.bias === 'BULL')                    pos.push('Tendance ↑');
+    else if (smc.bias === 'BEAR')               neg.push('Tendance ↓');
+    if (smc.zone === 'DISCOUNT')                pos.push('Soldes 🏷');
+    else if (smc.zone === 'PREMIUM')            neg.push('Zone chère');
+    if (bd.ob_present > 0)                      pos.push('OB frais ✅');
+    if (bd.fvg_present > 0)                     pos.push('FVG ✅');
+    if (opts.direction === 'BULLISH')            pos.push('Options OK 📊');
+    else if (opts.direction === 'BEARISH')       neg.push('Options ↓');
+    if (sigs.indexOf('SMA200_BOUNCE') >= 0)     pos.push('SMA200 rebond');
+    if (sigs.indexOf('VOLUME_MOMENTUM') >= 0)   pos.push('Volume 🔥');
+    if (sigs.indexOf('DISCOUNT_ZONE') >= 0 && pos.indexOf('Soldes 🏷') < 0) pos.push('Discount zone');
+    return { pos: pos, neg: neg };
   }
 
   // Inline styles
@@ -4557,7 +4698,7 @@ function CoachTab(props) {
             )}
             {goodSetups.map(function(s) {
               var sz = computeSizing(s);
-              var reasons = buildReasons(s);
+              var tags = buildTags(s);
               var isA = s.grade === 'A+' || s.grade === 'A';
               var borderClr = isA ? '#10b981' : '#3b82f6';
               var isSelected = selected && selected.ticker === s.ticker;
@@ -4603,22 +4744,24 @@ function CoachTab(props) {
                       Niveaux en cours de calcul — analyse complète dans 🧠 Analyse SMC
                     </div>
                   )}
-                  {/* Reasons */}
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11, color: '#475569', marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' }}>Pourquoi c'est intéressant :</div>
-                    {reasons.map(function(r, i) {
-                      return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
-                          <span style={{ color: '#10b981', flexShrink: 0 }}>✅</span>
-                          <span style={{ fontSize: 13, color: '#cbd5e1', lineHeight: 1.5 }}>{r}</span>
-                        </div>
-                      );
+                  {/* Tags positifs / négatifs */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                    {tags.pos.map(function(t) {
+                      return <span key={t} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: 'rgba(16,185,129,.1)', color: '#10b981', border: '1px solid rgba(16,185,129,.25)' }}>✅ {t}</span>;
+                    })}
+                    {tags.neg.map(function(t) {
+                      return <span key={t} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, background: 'rgba(239,68,68,.08)', color: '#ef4444', border: '1px solid rgba(239,68,68,.2)' }}>❌ {t}</span>;
                     })}
                   </div>
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      style={Object.assign({}, sBtnGhost, { borderColor: '#3b82f6', color: '#3b82f6' })}
+                      onClick={function() { setPineModal(s); }}>
+                      📋 Config TradingView
+                    </button>
                     <a href={'https://www.tradingview.com/chart/?symbol=NASDAQ:' + s.ticker} target="_blank" rel="noopener noreferrer"
                        style={Object.assign({}, sBtnGhost, { textDecoration: 'none', display: 'inline-flex', alignItems: 'center' })}>
-                      📈 Voir sur TradingView
+                      📈 Chart
                     </a>
                     <button style={isSelected ? sBtnGhost : sBtnGreen}
                             onClick={function() {
@@ -4666,8 +4809,15 @@ function CoachTab(props) {
     stepContent = (
       <div style={Object.assign({}, sBlock, { borderLeftColor: '#f59e0b', background: '#0d1829' })}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📈 Étape 3 — Vérifier sur TradingView</div>
-        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 20 }}>
-          Avant d'acheter {sel.ticker}, coche ces 5 points sur le graphique. Chaque case = une vérification réelle.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+          <div style={{ fontSize: 14, color: '#cbd5e1' }}>
+            Tu as copié la config ? Ouvre TradingView et coche ces 5 points :
+          </div>
+          {sel.ticker && (
+            <button style={Object.assign({}, sBtnGhost, { borderColor: '#3b82f6', color: '#3b82f6', flexShrink: 0 })} onClick={function() { setPineModal(sel); }}>
+              📋 Config TradingView
+            </button>
+          )}
         </div>
         <div style={{ marginBottom: 20 }}>
           {TV_CHECKS.map(function(chk, i) {
@@ -4712,29 +4862,23 @@ function CoachTab(props) {
     stepContent = (
       <div style={Object.assign({}, sBlock, { borderLeftColor: '#8b5cf6', background: '#0d1829' })}>
         <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>💰 Étape 4 — Passer l'ordre sur IBKR</div>
-        <div style={{ fontSize: 15, color: '#cbd5e1', marginBottom: 16 }}>
-          Tu as vérifié le setup sur TradingView. Il est temps de passer l'ordre.
+        <div style={{ fontSize: 14, color: '#cbd5e1', marginBottom: 16 }}>
+          Sur IBKR, passe cet ordre :
         </div>
-        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#8b5cf6' })}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#8b5cf6', marginBottom: 14, letterSpacing: 1 }}>SUR IBKR (TWS OU APPLI MOBILE) :</div>
-          <div style={sInstLine}>1. Cherche le ticker : <strong style={{ color: 'var(--text)', fontSize: 16 }}>{sel4.ticker}</strong></div>
-          <div style={sInstLine}>2. Clique <strong>Acheter (BUY)</strong></div>
-          <div style={sInstLine}>3. Type d'ordre : <strong>LIMIT</strong></div>
-          <div style={sInstLine}>4. Prix : <strong style={{ color: '#3b82f6' }}>${sel4.best_entry}</strong> (le prix ENTRY)</div>
-          <div style={sInstLine}>5. Quantité : <strong style={{ color: '#3b82f6' }}>{sz4.shares || '?'} actions</strong></div>
-          <div style={{ marginLeft: 16, marginTop: 8, marginBottom: 8, padding: '10px 14px', background: 'rgba(139,92,246,.08)', borderRadius: 6, borderLeft: '3px solid #8b5cf6' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#8b5cf6', marginBottom: 6 }}>6. IMPORTANT — Ajoute un bracket order :</div>
-            <div style={{ fontSize: 14, color: '#cbd5e1', marginBottom: 4 }}>• Stop Loss : <strong style={{ color: '#ef4444' }}>${sel4.best_stop}</strong></div>
-            <div style={{ fontSize: 14, color: '#cbd5e1' }}>• Take Profit : <strong style={{ color: '#10b981' }}>${sel4.best_target}</strong></div>
+        {/* Bloc ordre compact */}
+        <div style={{ background: '#0a0e17', border: '1px solid #1e293b', borderRadius: 10, padding: '18px 20px', marginBottom: 14, fontFamily: 'JetBrains Mono, monospace' }}>
+          <div style={{ fontSize: 11, color: '#8b5cf6', fontWeight: 700, letterSpacing: 2, marginBottom: 14 }}>ORDRE IBKR</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px 12px', fontSize: 14 }}>
+            <span style={{ color: '#64748b' }}>ACTION</span>   <strong style={{ color: '#10b981' }}>ACHETER {sel4.ticker}</strong>
+            <span style={{ color: '#64748b' }}>Type</span>     <strong>LIMIT</strong>
+            <span style={{ color: '#64748b' }}>Prix</span>     <strong style={{ color: '#3b82f6' }}>${sel4.best_entry}</strong>
+            <span style={{ color: '#64748b' }}>Quantité</span> <strong style={{ color: '#3b82f6' }}>{sz4.shares || '?'} actions</strong>
+            <span style={{ color: '#64748b' }}>Stop Loss</span><strong style={{ color: '#ef4444' }}>${sel4.best_stop}</strong>
+            <span style={{ color: '#64748b' }}>Take Profit</span><strong style={{ color: '#10b981' }}>${sel4.best_target}</strong>
           </div>
-          <div style={sInstLine}>7. Vérifie TOUT puis clique <strong>Transmettre</strong></div>
         </div>
-        <div style={Object.assign({}, sInstBlock, { borderLeftColor: '#ef4444' })}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', marginBottom: 10, letterSpacing: 1 }}>⚠️ VÉRIFICATIONS AVANT D'ENVOYER :</div>
-          <div style={sInstLine}>• Le montant total (<strong>${sz4.totalCost ? sz4.totalCost.toLocaleString() : '?'}</strong>) ne dépasse pas 3% de ton capital ?</div>
-          <div style={sInstLine}>• Tu n'as pas déjà 2 trades ouverts ?</div>
-          <div style={sInstLine}>• Le stop loss est bien en place ?</div>
-          <div style={sInstLine}>• On est entre 14h30 et 16h30 (killzone) ?</div>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16, lineHeight: 1.8 }}>
+          ⚠️ Vérifie : montant total ${sz4.totalCost ? sz4.totalCost.toLocaleString() : '?'} · max 2 trades · stop bien en place · killzone active
         </div>
         <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
           <button style={sBtnGreen} onClick={function() { setStep(5); }}>✅ Ordre passé</button>
@@ -4951,6 +5095,7 @@ function CoachTab(props) {
       {posSection}
       {progressSection}
       {rulesSection}
+      {pineModal && <PineConfigModal setup={pineModal} shares={pineModal ? (computeSizing(pineModal) || {}).shares : null} onClose={function() { setPineModal(null); }} />}
     </div>
   );
 }
