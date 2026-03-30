@@ -982,10 +982,15 @@ function RedditTab(props) {
   var discLoading   = props.discLoading   || false;
   var onLoadDisc    = props.onLoadDisc    || function() {};
   var onAnalyzeTk   = props.onAnalyzeTk   || function() {};
+  var onGoToSetups  = props.onGoToSetups  || function() {};
   var onAddTemp     = props.onAddTemp     || function() {};
   var tempWatchlist = props.tempWatchlist || [];
   var tempSet = {};
   tempWatchlist.forEach(function(t) { tempSet[t.ticker] = true; });
+
+  var showZeroState = useState(false);
+  var showZero      = showZeroState[0];
+  var setShowZero   = showZeroState[1];
 
   // ── Métriques watchlist (parseInt pour éviter bugs string/NaN) ────────────
   var totalMent      = items.reduce(function(s, r) { return s + (parseInt(r.mentions) || 0); }, 0);
@@ -1088,53 +1093,85 @@ function RedditTab(props) {
         </div>
       )}
 
-      {/* Tableau watchlist */}
-      <div className="card mb24" style={{ padding: 0, overflow: 'hidden' }}>
-        <table className="tbl">
-          <thead>
-            <tr><th>Ticker</th><th>Tendance 5j</th><th>Mentions</th><th>Sentiment</th><th>Style</th><th>Subreddits</th></tr>
-          </thead>
-          <tbody>
-            {items.map(function(r) {
-              var hasM = (parseInt(r.mentions) || 0) > 0;
-              var sc = STYLE_COLORS[r.trade_style] || '#64748b';
-              return (
-                <tr key={r.ticker} style={{ opacity: hasM ? 1 : 0.4 }}>
-                  <td>
-                    <div className="row g6">
-                      <span style={{ fontWeight: hasM ? 700 : 400, color: hasM ? 'var(--text)' : 'var(--muted)' }}>
-                        {r.ticker}
-                        {r.in_watchlist && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--accent)' }}>●</span>}
-                      </span>
-                      {r.cross_validated && r.verified && (
-                        <span style={{ fontSize: 9, background: '#10b98120', color: 'var(--bull)', border: '1px solid #10b98140', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>✅</span>
-                      )}
-                    </div>
-                  </td>
-                  <td>{trendBadge(r)}</td>
-                  <td>
-                    <span style={{ fontWeight: 600 }}>{parseInt(r.mentions) || 0}</span>
-                    {r.mentions_avg_5d != null && (
-                      <span className="mc" style={{ marginLeft: 5, fontSize: 10 }}>moy {r.mentions_avg_5d}</span>
-                    )}
-                  </td>
-                  <td>
-                    <span style={{ color: sntClr(r.sentiment_label), fontWeight: 600 }}>{(parseInt(r.net_sentiment) || 0) > 0 ? '+' : ''}{parseInt(r.net_sentiment) || 0}</span>
-                    <span className="mc" style={{ marginLeft: 6, fontSize: 10 }}>{r.sentiment_label}</span>
-                  </td>
-                  <td>
-                    {r.trade_style && r.trade_style !== '?'
-                      ? <span className="badge" style={{ background: sc + '20', color: sc, border: '1px solid ' + sc + '40' }}>{r.trade_style}</span>
-                      : <span className="mc">—</span>
-                    }
-                  </td>
-                  <td><span className="mc" style={{ fontSize: 11 }}>{(r.subreddits || []).slice(0, 3).join(', ') || '—'}</span></td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* Tableau watchlist — filtré par défaut (0 mentions masqués) */}
+      {(function() {
+        var activeItems = items.filter(function(r) { return (parseInt(r.mentions) || 0) > 0; });
+        var zeroCount   = items.length - activeItems.length;
+        var displayItems = showZero ? items : activeItems;
+        return (
+          <div>
+            <div className="card mb8" style={{ padding: 0, overflow: 'hidden' }}>
+              <table className="tbl">
+                <thead>
+                  <tr><th>Ticker</th><th>Tendance</th><th>Mentions</th><th>Sentiment</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {displayItems.map(function(r) {
+                    var hasM = (parseInt(r.mentions) || 0) > 0;
+                    return (
+                      <tr key={r.ticker} style={{ opacity: hasM ? 1 : 0.35 }}>
+                        <td>
+                          <div className="row g6">
+                            <span style={{ fontWeight: hasM ? 700 : 400, color: hasM ? 'var(--text)' : 'var(--muted)' }}>
+                              {r.ticker}
+                              {r.in_watchlist && <span style={{ marginLeft: 5, fontSize: 9, color: 'var(--accent)' }}>●</span>}
+                            </span>
+                            {r.cross_validated && r.verified && (
+                              <span style={{ fontSize: 9, background: '#10b98120', color: 'var(--bull)', border: '1px solid #10b98140', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>✅</span>
+                            )}
+                          </div>
+                        </td>
+                        <td>{trendBadge(r)}</td>
+                        <td>
+                          <span style={{ fontWeight: 600, color: hasM ? 'var(--text)' : 'var(--dim)' }}>{parseInt(r.mentions) || 0}</span>
+                          {r.mentions_avg_5d != null && (
+                            <span className="mc" style={{ marginLeft: 5, fontSize: 10 }}>moy {r.mentions_avg_5d}</span>
+                          )}
+                          {hasM && (
+                            <span style={{ marginLeft: 5, color: sntClr(r.sentiment_label), fontSize: 10 }}>
+                              {(parseInt(r.net_sentiment) || 0) > 0 ? '+' : ''}{parseInt(r.net_sentiment) || 0}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span style={{ color: sntClr(r.sentiment_label), fontWeight: 600, fontSize: 11 }}>{r.sentiment_label}</span>
+                        </td>
+                        <td>
+                          {hasM && (
+                            <div className="row g4">
+                              <button className="btn btn-p" style={{ fontSize: 9, padding: '2px 7px' }}
+                                onClick={function() { onAnalyzeTk(r.ticker); }}>
+                                🧠 SMC
+                              </button>
+                              <button className="btn" style={{ fontSize: 9, padding: '2px 7px' }}
+                                onClick={function() { onGoToSetups(r.ticker); }}>
+                                🎯 Setup
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {/* Résumé + toggle */}
+            <div className="mb24" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 2px' }}>
+              <span className="mc" style={{ fontSize: 11 }}>
+                📊 {activeItems.length}/{items.length} tickers mentionnés sur Reddit aujourd'hui.
+                {zeroCount > 0 && !showZero && ` Les ${zeroCount} autres n'ont aucune mention.`}
+              </span>
+              {zeroCount > 0 && (
+                <button className="btn" style={{ fontSize: 10, padding: '2px 10px' }}
+                  onClick={function() { setShowZero(function(v) { return !v; }); }}>
+                  {showZero ? 'Masquer les sans mention' : 'Voir tous (' + zeroCount + ' sans mention)'}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ ZONE 2 — TROUVAILLES ════════════════════════════════════════════ */}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 20 }}>
@@ -2205,6 +2242,14 @@ function SmcTab(props) {
   var smcPineModal = smcPineState[0];
   var setSmcPineModal = smcPineState[1];
 
+  var expertModeState = useState(false);
+  var expertMode      = expertModeState[0];
+  var setExpertMode   = expertModeState[1];
+
+  var freeTickerState = useState('');
+  var freeTicker      = freeTickerState[0];
+  var setFreeTicker   = freeTickerState[1];
+
   useEffect(function() {
     if (!smcData[selectedTicker]) { onAnalyze(selectedTicker); }
   }, []);
@@ -2302,8 +2347,8 @@ function SmcTab(props) {
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>Analyse algorithmique — passez en MODE LIVE avec Claude API pour des analyses plus fines</span>
       </div>
 
-      {/* Sélecteur + bouton */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Sélecteur + boutons + toggle Mode */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={selectedTicker}
           onChange={function(e) { setSelectedTicker(e.target.value); }}
           style={Object.assign({}, inp, { minWidth: 120 })}>
@@ -2318,9 +2363,50 @@ function SmcTab(props) {
         <button className="btn" style={{ borderColor: '#fbbf24', color: '#fbbf24' }} onClick={handleUnified} disabled={smcLoading || unifiedLoading}>
           {unifiedLoading ? <span><span className="spin-anim">⟳</span> En cours...</span> : '🎯 Score Unifié'}
         </button>
+        {/* Toggle Mode Simple / Expert */}
+        <div style={{ display: 'flex', borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border)', marginLeft: 'auto' }}>
+          <button
+            style={{ padding: '5px 12px', fontSize: 11, background: !expertMode ? 'var(--accent)' : 'transparent', color: !expertMode ? '#000' : 'var(--muted)', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+            onClick={function() { setExpertMode(false); }}>
+            🔰 Simple
+          </button>
+          <button
+            style={{ padding: '5px 12px', fontSize: 11, background: expertMode ? '#8b5cf6' : 'transparent', color: expertMode ? '#fff' : 'var(--muted)', border: 'none', cursor: 'pointer', fontFamily: 'inherit', borderLeft: '1px solid var(--border)' }}
+            onClick={function() { setExpertMode(true); }}>
+            🔬 Expert
+          </button>
+        </div>
         {analysis && analysis.analysis_date && (
           <span className="mc" style={{ fontSize: 10 }}>Analysé le {analysis.analysis_date}</span>
         )}
+      </div>
+      {/* Ticker libre */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+        <input
+          value={freeTicker}
+          onChange={function(e) { setFreeTicker(e.target.value.toUpperCase()); }}
+          onKeyDown={function(e) {
+            if (e.key === 'Enter' && freeTicker.trim()) {
+              var tk = freeTicker.trim();
+              setSelectedTicker(tk);
+              setFreeTicker('');
+              onAnalyze(tk);
+              onUnified(tk);
+            }
+          }}
+          placeholder="Ticker libre (ex: HOOD)"
+          style={Object.assign({}, inp, { width: 160, fontSize: 12 })} />
+        <button className="btn" style={{ fontSize: 11 }}
+          onClick={function() {
+            var tk = freeTicker.trim();
+            if (!tk) return;
+            setSelectedTicker(tk);
+            setFreeTicker('');
+            onAnalyze(tk);
+            onUnified(tk);
+          }}>
+          Analyser →
+        </button>
       </div>
 
       {/* Carte Score Unifié */}
@@ -2446,6 +2532,9 @@ function SmcTab(props) {
       {/* Contenu analyse */}
       {analysis && !analysis.error && (
         <div>
+          {/* ── Sections expert uniquement ── */}
+          {expertMode && (
+          <div>
           {/* ── Section 1 : Structure de marché */}
           <div className="stitle">STRUCTURE DE MARCHÉ</div>
           <div className="card mb16">
@@ -2596,6 +2685,9 @@ function SmcTab(props) {
             </div>
           </div>
 
+          </div>
+          )} {/* fin expertMode sections 1-4 */}
+
           {/* ── Section 5 : Setup */}
           {su.has_setup && (
             <div>
@@ -2730,16 +2822,20 @@ function SmcTab(props) {
             </div>
           )}
 
-          {/* ── Section 6 : Rapport texte */}
-          <div className="stitle">RAPPORT COMPLET</div>
-          <div className="card mb16">
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-              <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={copyReport}>📋 Copier le rapport</button>
+          {/* ── Section 6 : Rapport texte (expert seulement) */}
+          {expertMode && (
+            <div>
+              <div className="stitle">RAPPORT COMPLET</div>
+              <div className="card mb16">
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                  <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={copyReport}>📋 Copier le rapport</button>
+                </div>
+                <pre style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.6, margin: 0 }}>
+                  {analysis.report || '—'}
+                </pre>
+              </div>
             </div>
-            <pre style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.6, margin: 0 }}>
-              {analysis.report || '—'}
-            </pre>
-          </div>
+          )}
         </div>
       )}
 
@@ -2811,14 +2907,16 @@ function SetupsTab(props) {
   var setupsData    = props.setupsData;
   var setupsLoading = props.setupsLoading;
   var onScan        = props.onScan || function() {};
+  var onAnalyzeTk   = props.onAnalyzeTk || function() {};
   var setups        = (setupsData && setupsData.setups) || [];
   var sps = useState(null); var setupsPineModal = sps[0]; var setSetupsPineModal = sps[1];
+  var fts = useState('');   var freeSetupTicker = fts[0]; var setFreeSetupTicker = fts[1];
 
   return (
     <div>
       {/* Header + bouton scan */}
       <div className="card mb16" style={{ padding: '14px 18px' }}>
-        <div className="rowb">
+        <div className="rowb" style={{ marginBottom: 10 }}>
           <div>
             <div style={{ fontWeight: 700, marginBottom: 4 }}>Détecteur de Setups SMC</div>
             <div className="mc" style={{ fontSize: 11 }}>Analyse DISCOUNT ZONE · SMA200 BOUNCE · MOMENTUM sur toute la watchlist</div>
@@ -2829,6 +2927,29 @@ function SetupsTab(props) {
               ? <span><span className="spin-anim">⟳</span> Analyse en cours...</span>
               : '🔍 Scanner les setups'}
           </button>
+        </div>
+        {/* Ticker libre → Analyse SMC */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+          <span className="mc" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>Ticker libre :</span>
+          <input
+            value={freeSetupTicker}
+            onChange={function(e) { setFreeSetupTicker(e.target.value.toUpperCase()); }}
+            onKeyDown={function(e) {
+              if (e.key === 'Enter' && freeSetupTicker.trim()) {
+                onAnalyzeTk(freeSetupTicker.trim());
+                setFreeSetupTicker('');
+              }
+            }}
+            placeholder="Ex: HOOD, SOFI..."
+            style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', color: 'var(--text)', fontFamily: 'inherit', fontSize: 12, width: 140 }} />
+          <button className="btn btn-p" style={{ fontSize: 11 }}
+            onClick={function() {
+              var tk = freeSetupTicker.trim();
+              if (tk) { onAnalyzeTk(tk); setFreeSetupTicker(''); }
+            }}>
+            🧠 Analyser →
+          </button>
+        </div>
         </div>
         {setupsData && !setupsLoading && (
           <div className="mc" style={{ fontSize: 10, marginTop: 8 }}>
@@ -5581,10 +5702,10 @@ function TradingDashboard() {
         {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} tradesProgress={tradesProgress} />}
         {tab === 'coach'     && <CoachTab data={data} posMonitor={posMonitor} scanResults={scanResults} scanLoading={scanLoading} onScan={loadScanUnified} onRefresh={handleRefresh} refreshLoading={loading} lastUpd={lastUpd} onGoToJournal={handleAddTradeFromSmc} tradesProgress={tradesProgress} />}
         {tab === 'watchlist' && <WatchlistTab data={data} />}
-        {tab === 'reddit'    && <RedditTab data={data} discoveries={discoveries} discLoading={discLoading} onLoadDisc={loadDiscoveries} onAnalyzeTk={analyzeDiscovery} onAddTemp={addTempTicker} tempWatchlist={tempWatchlist} />}
+        {tab === 'reddit'    && <RedditTab data={data} discoveries={discoveries} discLoading={discLoading} onLoadDisc={loadDiscoveries} onAnalyzeTk={analyzeDiscovery} onGoToSetups={function(ticker) { setTab('setups'); }} onAddTemp={addTempTicker} tempWatchlist={tempWatchlist} />}
         {tab === 'news'      && <NewsTab      data={data} />}
         {tab === 'alerts'    && <AlertsTab alertData={alertData} liveNews={liveNews} countdown={(alertData.in_killzone || testMode) ? countdown : null} testMode={testMode} onSimulate={activateTestMode} posMonitor={posMonitor} />}
-        {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} />}
+        {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} onAnalyzeTk={analyzeDiscovery} />}
         {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} unifiedData={unifiedData} unifiedLoading={unifiedLoading} scanResults={scanResults} scanLoading={scanLoading} extraTickers={extraTickers} forceTicker={smcForceTicker} onClearForceTicker={function() { setSmcForceTicker(null); }} onAnalyze={loadSmcAnalysis} onUnified={loadUnifiedAnalysis} onScan={loadScanUnified} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
         {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} prefillTrade={prefillTrade} onClearPrefill={function() { setPrefillTrade(null); }} /></ErrorBoundary>}
         {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}

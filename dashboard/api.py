@@ -81,7 +81,7 @@ from scrapers.rss_news import fetch_and_filter
 from scrapers.macro_calendar import (
     detect_recurring_events, check_earnings_today, get_trading_recommendation,
 )
-from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv, is_known_ticker
+from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv, is_known_ticker, scan_reddit_direct
 from analysis.scoring import score_ticker, score_market_context, rank_tickers
 from analysis.reddit_trend import get_reddit_trends, save_today_snapshot, verify_ticker
 from database.models import (
@@ -335,133 +335,158 @@ def get_tickers():
 @app.get("/api/reddit")
 def get_reddit():
     """
-    Données Reddit enrichies :
-      - tendance 5 jours (RISING / FALLING / STABLE / NEW)
-      - verified    : ticker connu (VALID_TICKERS ou watchlist) ou confirmé yfinance
-      - cross_validated : mentionné Reddit + dans les news RSS
-    Ne relance pas le scanner — lit les fichiers existants.
+    Données Reddit enrichies via scan_reddit_direct() (JSON public Reddit).
+    Source principale : scrape live des 7 subreddits, cache 30 min.
+    Fallback : lecture CSV RedditScanner si le scan direct échoue.
     """
     try:
-        scanner_dir = find_scanner_dir()
-        if scanner_dir is None:
-            return {"error": "Scanner Reddit non trouvé", "data": []}
+        # ── Source principale : scan direct Reddit ────────────────────────────
+        direct = scan_reddit_direct(cache_ttl=1800)
+        wl_rows = direct["watchlist_results"]
 
-        df = read_reddit_csv(scanner_dir)
-        if df is None or df.empty:
-            return {"error": "Pas de données Reddit (CSV vide)", "data": []}
+        # Ajouter les tickers temporaires manquants
+        temp_tickers = set(t["ticker"].upper() for t in _TEMP_WATCHLIST.values())
+        found_tickers = {r["ticker"] for r in wl_rows}
+        for tk in sorted(temp_tickers):
+            if tk not in found_tickers:
+                wl_rows.append({
+                    "ticker": tk, "mentions": 0, "net_sentiment": 0,
+                    "sentiment_label": "NEUTRAL", "trade_style": "—",
+                    "subreddits": [], "in_watchlist": True, "verified": True,
+                    "source": "reddit_direct", "cross_validated": False,
+                    "trend": "NEW", "trend_pct": None, "mentions_avg_5d": None,
+                    "is_temp": True,
+                })
 
-        # ── 1. Snapshot journalier ────────────────────────────────────────────
-        csv_path = scanner_dir / "reddit_watchlist.csv"
-        snapshots_dir = scanner_dir / "snapshots"
-        save_today_snapshot(csv_path, snapshots_dir)
+        # Marquer les tickers temporaires
+        for r in wl_rows:
+            r["is_temp"] = r["ticker"] in temp_tickers
 
-        # ── 2. Tendances 5 jours ──────────────────────────────────────────────
-        trends = get_reddit_trends(snapshots_dir)
+        discoveries_count = len(direct["discovery_results"])
 
-        # ── 3. Tickers news (cross-validation) ───────────────────────────────
-        news_tickers: set = set()
+        print(f"[/api/reddit] scan_reddit_direct → "
+              f"{sum(1 for r in wl_rows if r['mentions'] > 0)} actifs, "
+              f"{discoveries_count} trouvailles, "
+              f"cache={direct['from_cache']}")
+
+        return clean_for_json({
+            "count":             len(wl_rows),
+            "data":              wl_rows,
+            "updated_at":        direct["scanned_at"],
+            "discoveries_count": discoveries_count,
+            "source":            "reddit_direct",
+            "from_cache":        direct["from_cache"],
+        })
+
+    except Exception as e:
+        print(f"[/api/reddit] reddit_direct échoué : {e} — fallback CSV")
+        # ── Fallback CSV RedditScanner ────────────────────────────────────────
         try:
-            _, ticker_news, _, _ = fetch_and_filter(max_per_feed=3)
-            for n in ticker_news:
-                for t in n.get("matched_tickers", []):
-                    news_tickers.add(str(t).upper())
-        except Exception:
-            pass  # non bloquant
+            scanner_dir = find_scanner_dir()
+            if scanner_dir is None:
+                return {"error": "Scanner Reddit non trouvé", "data": [], "discoveries_count": 0}
+            df = read_reddit_csv(scanner_dir)
+            if df is None or df.empty:
+                return {"error": "Pas de données Reddit (CSV vide)", "data": [], "discoveries_count": 0}
 
-        # ── 4. Signaux JSON ───────────────────────────────────────────────────
-        signals_by_ticker = {}
-        signals_path = scanner_dir / "reddit_sentiment_signals.json"
-        if signals_path.exists():
+            csv_path      = scanner_dir / "reddit_watchlist.csv"
+            snapshots_dir = scanner_dir / "snapshots"
+            save_today_snapshot(csv_path, snapshots_dir)
+            trends = get_reddit_trends(snapshots_dir)
+
+            news_tickers: set = set()
             try:
-                with open(signals_path, "r", encoding="utf-8") as f:
-                    signals = json.load(f)
-                for sig in signals:
-                    t = sig.get("ticker", "")
-                    if t:
-                        signals_by_ticker[t] = sig.get("sentiment_summary", {})
+                _, ticker_news, _, _ = fetch_and_filter(max_per_feed=3)
+                for n in ticker_news:
+                    for t in n.get("matched_tickers", []):
+                        news_tickers.add(str(t).upper())
             except Exception:
                 pass
 
-        # ── 5. Ensemble autorisé : WATCHLIST + tickers temporaires ──────────────
-        # SEULS ces tickers peuvent apparaître dans le tableau principal.
-        watchlist_set = set(t.upper() for t in WATCHLIST)
-        for t in _TEMP_WATCHLIST.values():
-            watchlist_set.add(t["ticker"].upper())
-
-        # Compte rapide des trouvailles potentielles AVANT le filtre strict
-        # (tickers hors watchlist vérifiés avec >= 2 mentions dans le CSV)
-        discoveries_count = 0
-        from scrapers.reddit import TICKER_BLACKLIST as _BL
-        for _, row in df.iterrows():
-            tk = str(row.get("Ticker", "")).strip().upper()
-            if tk and tk not in watchlist_set and tk not in _BL:
+            signals_by_ticker = {}
+            signals_path = scanner_dir / "reddit_sentiment_signals.json"
+            if signals_path.exists():
                 try:
-                    ment = int(row.get("Mentions", 0))
+                    with open(signals_path, "r", encoding="utf-8") as f:
+                        signals = json.load(f)
+                    for sig in signals:
+                        t = sig.get("ticker", "")
+                        if t:
+                            signals_by_ticker[t] = sig.get("sentiment_summary", {})
                 except Exception:
-                    ment = 0
-                if ment >= 2 and is_known_ticker(tk):
-                    discoveries_count += 1
+                    pass
 
-        # ── 6. Construction des lignes — FILTRE STRICT watchlist_set ──────────
-        # Toute ligne dont le ticker n'est PAS dans watchlist_set est ignorée.
-        csv_by_ticker: dict = {}
-        for _, row in df.iterrows():
-            ticker = str(row.get("Ticker", "")).strip().upper()
-            if not ticker or ticker not in watchlist_set:
-                continue                                   # ← filtre strict ici
-            csv_by_ticker[ticker] = row
+            watchlist_set = set(t.upper() for t in WATCHLIST)
+            for t in _TEMP_WATCHLIST.values():
+                watchlist_set.add(t["ticker"].upper())
 
-        # ── 7. Construire une ligne pour CHACUN des 22 tickers (+ temp) ────────
-        wl_rows = []
-        for ticker in sorted(watchlist_set):
-            row = csv_by_ticker.get(ticker)
+            discoveries_count = 0
+            from scrapers.reddit import TICKER_BLACKLIST as _BL
+            for _, row in df.iterrows():
+                tk = str(row.get("Ticker", "")).strip().upper()
+                if tk and tk not in watchlist_set and tk not in _BL:
+                    try:
+                        ment = int(row.get("Mentions", 0))
+                    except Exception:
+                        ment = 0
+                    if ment >= 2 and is_known_ticker(tk):
+                        discoveries_count += 1
 
-            if row is not None:
-                try:
-                    mentions = int(row.get("Mentions", 0))
-                except Exception:
-                    mentions = 0
-                try:
-                    net_sent = int(row.get("Net_Sentiment", 0))
-                except Exception:
-                    net_sent = 0
-                style      = str(row.get("Trade_Style", "—"))
-                subreddits = row.get("Subreddits", "")
-                subs_list  = [s.strip() for s in str(subreddits).split(",") if s.strip() and str(subreddits) != "nan"]
-                td = trends.get(ticker, {"trend": "NEW", "trend_pct": None, "mentions_avg_5d": None})
-            else:
-                # Ticker de la watchlist absent du CSV → 0 mentions
-                mentions, net_sent, style, subs_list = 0, 0, "—", []
-                td = {"trend": "NEW", "trend_pct": None, "mentions_avg_5d": None}
+            csv_by_ticker: dict = {}
+            for _, row in df.iterrows():
+                ticker = str(row.get("Ticker", "")).strip().upper()
+                if not ticker or ticker not in watchlist_set:
+                    continue
+                csv_by_ticker[ticker] = row
 
-            wl_rows.append({
-                "ticker":          ticker,
-                "mentions":        mentions,
-                "net_sentiment":   net_sent,
-                "sentiment_label": "BULL" if net_sent > 0 else "BEAR" if net_sent < 0 else "NEUTRAL",
-                "trade_style":     style,
-                "subreddits":      subs_list,
-                "signals":         signals_by_ticker.get(ticker, {}),
-                "in_watchlist":    True,
-                "verified":        True,
-                "cross_validated": ticker in news_tickers,
-                "trend":           td.get("trend", "NEW"),
-                "trend_pct":       td.get("trend_pct"),
-                "mentions_avg_5d": td.get("mentions_avg_5d"),
-                "is_temp":         ticker in {t["ticker"].upper() for t in _TEMP_WATCHLIST.values()},
+            wl_rows = []
+            for ticker in sorted(watchlist_set):
+                row = csv_by_ticker.get(ticker)
+                if row is not None:
+                    try:
+                        mentions = int(row.get("Mentions", 0))
+                    except Exception:
+                        mentions = 0
+                    try:
+                        net_sent = int(row.get("Net_Sentiment", 0))
+                    except Exception:
+                        net_sent = 0
+                    style     = str(row.get("Trade_Style", "—"))
+                    subs_raw  = row.get("Subreddits", "")
+                    subs_list = [s.strip() for s in str(subs_raw).split(",") if s.strip() and str(subs_raw) != "nan"]
+                    td = trends.get(ticker, {"trend": "NEW", "trend_pct": None, "mentions_avg_5d": None})
+                else:
+                    mentions, net_sent, style, subs_list = 0, 0, "—", []
+                    td = {"trend": "NEW", "trend_pct": None, "mentions_avg_5d": None}
+
+                wl_rows.append({
+                    "ticker":          ticker,
+                    "mentions":        mentions,
+                    "net_sentiment":   net_sent,
+                    "sentiment_label": "BULL" if net_sent > 0 else "BEAR" if net_sent < 0 else "NEUTRAL",
+                    "trade_style":     style,
+                    "subreddits":      subs_list,
+                    "signals":         signals_by_ticker.get(ticker, {}),
+                    "in_watchlist":    True,
+                    "verified":        True,
+                    "cross_validated": ticker in news_tickers,
+                    "trend":           td.get("trend", "NEW"),
+                    "trend_pct":       td.get("trend_pct"),
+                    "mentions_avg_5d": td.get("mentions_avg_5d"),
+                    "is_temp":         ticker in {t["ticker"].upper() for t in _TEMP_WATCHLIST.values()},
+                    "source":          "csv_fallback",
+                })
+
+            wl_rows.sort(key=lambda r: -r["mentions"])
+            return clean_for_json({
+                "count":             len(wl_rows),
+                "data":              wl_rows,
+                "updated_at":        datetime.now().isoformat(),
+                "discoveries_count": discoveries_count,
+                "source":            "csv_fallback",
             })
-
-        # Tri : mentions descendantes
-        wl_rows.sort(key=lambda r: -r["mentions"])
-
-        return {
-            "count":             len(wl_rows),
-            "data":              wl_rows,
-            "updated_at":        datetime.now().isoformat(),
-            "discoveries_count": discoveries_count,
-        }
-    except Exception as e:
-        return {"error": str(e), "data": [], "discoveries_count": 0}
+        except Exception as e2:
+            return {"error": str(e2), "data": [], "discoveries_count": 0, "source": "error"}
 
 
 @app.get("/api/reddit/discoveries")

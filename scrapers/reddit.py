@@ -471,6 +471,167 @@ def get_reddit_discoveries(
     return top
 
 
+# ── Cache module-level pour scan_reddit_direct ────────────────────────────────
+_DIRECT_CACHE: dict = {"data": None, "expires": 0.0}
+
+
+def scan_reddit_direct(cache_ttl: int = 1800) -> dict:
+    """
+    Scrape directement Reddit (JSON public) — source principale pour /api/reddit.
+    Plus rapide et fiable que le subprocess RedditScanner (pas de CSV intermédiaire).
+
+    Retourne {
+      watchlist_results: [{ticker, mentions, net_sentiment, sentiment_label,
+                            trade_style, subreddits, in_watchlist, verified, ...}],
+      discovery_results: [...],   # tickers hors watchlist, triés par mentions
+      scanned_at: str,
+      total_posts: int,
+      from_cache: bool
+    }
+    TTL cache : cache_ttl secondes (défaut 30 min).
+    """
+    import requests
+    import re
+    import time as _time
+    from datetime import datetime
+
+    now = _time.time()
+
+    # Retourner le cache si encore valide
+    if _DIRECT_CACHE["data"] is not None and now < _DIRECT_CACHE["expires"]:
+        result = dict(_DIRECT_CACHE["data"])
+        result["from_cache"] = True
+        remaining = int(_DIRECT_CACHE["expires"] - now)
+        print(f"  [reddit_direct] Cache valide ({remaining}s restantes)")
+        return result
+
+    SUBREDDITS = [
+        "stocks", "wallstreetbets", "investing",
+        "Daytrading", "StockMarket", "options", "buzztickr",
+    ]
+    watchlist_set = set(t.upper() for t in WATCHLIST)
+    headers = {"User-Agent": "SMC-AI-Scanner/2.0"}
+
+    ticker_data: dict = {}   # ticker → {mentions, score_sum, upvote_sum, count, subreddits}
+    total_posts = 0
+
+    for sub in SUBREDDITS:
+        try:
+            url = f"https://www.reddit.com/r/{sub}/hot.json?limit=50"
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                print(f"  [reddit_direct] {sub}: HTTP {resp.status_code}")
+                continue
+            posts = resp.json().get("data", {}).get("children", [])
+            total_posts += len(posts)
+            for post in posts:
+                pd_ = post["data"]
+                title        = pd_.get("title", "")
+                score        = int(pd_.get("score", 0))
+                upvote_ratio = float(pd_.get("upvote_ratio", 0.5))
+
+                # $TICKER (haute confiance) puis mots majuscules
+                found = set(re.findall(r'\$([A-Z]{2,5})', title))
+                found |= set(re.findall(r'\b([A-Z]{2,5})\b', title))
+
+                for t in found:
+                    if t in TICKER_BLACKLIST or len(t) < 2 or len(t) > 5:
+                        continue
+                    if t not in ticker_data:
+                        ticker_data[t] = {
+                            "mentions": 0, "score_sum": 0,
+                            "upvote_sum": 0.0, "count": 0, "subreddits": set(),
+                        }
+                    ticker_data[t]["mentions"]    += 1
+                    ticker_data[t]["score_sum"]   += score
+                    ticker_data[t]["upvote_sum"]  += upvote_ratio
+                    ticker_data[t]["count"]       += 1
+                    ticker_data[t]["subreddits"].add(sub)
+
+            print(f"  [reddit_direct] {sub}: {len(posts)} posts")
+        except Exception as e:
+            print(f"  [reddit_direct] {sub}: erreur {e}")
+
+    print(f"  [reddit_direct] Total : {total_posts} posts, {len(ticker_data)} tickers bruts")
+
+    watchlist_results: list[dict] = []
+    discovery_results: list[dict] = []
+
+    for ticker, td in ticker_data.items():
+        mentions   = td["mentions"]
+        count      = td["count"] or 1
+        avg_score  = td["score_sum"] / count
+        avg_upvote = td["upvote_sum"] / count
+
+        if avg_upvote > 0.70 and avg_score > 50:
+            net_sentiment   = max(1, int(avg_score / 20))
+            sentiment_label = "BULL"
+        elif avg_upvote < 0.40:
+            net_sentiment   = -max(1, int(abs(avg_score) / 20))
+            sentiment_label = "BEAR"
+        else:
+            net_sentiment   = 0
+            sentiment_label = "NEUTRAL"
+
+        entry = {
+            "ticker":          ticker,
+            "mentions":        mentions,
+            "net_sentiment":   net_sentiment,
+            "sentiment_label": sentiment_label,
+            "trade_style":     "SWING" if mentions > 3 else "DAY" if mentions >= 2 else "?",
+            "subreddits":      sorted(td["subreddits"]),
+            "in_watchlist":    ticker in watchlist_set,
+            "verified":        is_known_ticker(ticker),
+            "source":          "reddit_direct",
+            "cross_validated": False,
+            "trend":           "NEW",
+            "trend_pct":       None,
+            "mentions_avg_5d": None,
+            "is_temp":         False,
+        }
+
+        if ticker in watchlist_set:
+            watchlist_results.append(entry)
+        elif mentions >= 1:
+            discovery_results.append(entry)
+
+    # Trier watchlist par mentions décroissantes
+    watchlist_results.sort(key=lambda x: -x["mentions"])
+
+    # Compléter la watchlist avec les tickers à 0 mentions
+    found_wl = {r["ticker"] for r in watchlist_results}
+    for tk in sorted(watchlist_set):
+        if tk not in found_wl:
+            watchlist_results.append({
+                "ticker": tk, "mentions": 0, "net_sentiment": 0,
+                "sentiment_label": "NEUTRAL", "trade_style": "—",
+                "subreddits": [], "in_watchlist": True, "verified": True,
+                "source": "reddit_direct", "cross_validated": False,
+                "trend": "NEW", "trend_pct": None, "mentions_avg_5d": None,
+                "is_temp": False,
+            })
+
+    discovery_results.sort(key=lambda x: -x["mentions"])
+
+    print(f"  [reddit_direct] Résultat : "
+          f"{sum(1 for r in watchlist_results if r['mentions'] > 0)} watchlist actifs, "
+          f"{len(discovery_results[:20])} trouvailles")
+
+    result = {
+        "watchlist_results": watchlist_results,
+        "discovery_results": discovery_results[:20],
+        "scanned_at":        datetime.now().isoformat(),
+        "total_posts":       total_posts,
+        "from_cache":        False,
+    }
+
+    # Mettre en cache
+    _DIRECT_CACHE["data"]    = result
+    _DIRECT_CACHE["expires"] = now + cache_ttl
+
+    return result
+
+
 # === TEST ===
 if __name__ == "__main__":
     print("=== TEST REDDIT WRAPPER ===\n")
@@ -479,6 +640,18 @@ if __name__ == "__main__":
     buzz = scan_buzztickers()
     for b in buzz[:10]:
         print(f"  {b['ticker']:6s}  {b['mentions']} mentions  [{b['source']}]")
+
+    print("\n--- scan_reddit_direct() ---")
+    direct = scan_reddit_direct(cache_ttl=0)   # cache_ttl=0 → scan frais à chaque test
+    wl = [r for r in direct["watchlist_results"] if r["mentions"] > 0]
+    print(f"  Watchlist actifs : {len(wl)}/{len(direct['watchlist_results'])} | Posts scannés : {direct['total_posts']}")
+    print(f"  Depuis le cache : {direct['from_cache']}")
+    for r in wl[:10]:
+        sent = f"+{r['net_sentiment']}" if r['net_sentiment'] >= 0 else str(r['net_sentiment'])
+        print(f"    {r['ticker']:6s}  {r['mentions']:3d} mentions  sent:{sent:>4s}  {','.join(r['subreddits'][:2])}")
+    print(f"\n  Trouvailles ({len(direct['discovery_results'])}) :")
+    for r in direct["discovery_results"][:10]:
+        print(f"    {r['ticker']:6s}  {r['mentions']:3d} mentions  verified={r['verified']}")
 
     print("\n--- format_reddit_section() ---")
     section = format_reddit_section(refresh=False)
