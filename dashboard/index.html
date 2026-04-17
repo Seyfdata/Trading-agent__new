@@ -2429,11 +2429,20 @@ function SmcTab(props) {
                 </div>
                 {ud.current_price != null && <span style={{ fontSize: 13, color: 'var(--muted)' }}>${Number(ud.current_price).toFixed(2)}</span>}
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-                {bdEntries.map(function(item, i) {
-                  return <span key={i} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 3, color: item.v ? '#10b981' : '#475569', background: item.v ? 'rgba(16,185,129,.07)' : 'transparent' }}>{item.v ? '✅' : '❌'} {bdLabels[item.k] || item.k}</span>;
-                })}
-              </div>
+              {!expertMode ? (
+                <div style={{ display: 'flex', gap: 4, marginBottom: 12, alignItems: 'center' }}>
+                  {bdEntries.map(function(item, i) {
+                    return <span key={i} title={bdLabels[item.k] || item.k} style={{ width: 9, height: 9, borderRadius: '50%', background: item.v ? '#10b981' : '#1e293b', display: 'inline-block', border: item.v ? '1px solid rgba(16,185,129,.5)' : '1px solid #334155', cursor: 'default' }} />;
+                  })}
+                  <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 6 }}>{bdEntries.filter(function(x) { return x.v; }).length}/{bdEntries.length} critères</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {bdEntries.map(function(item, i) {
+                    return <span key={i} style={{ fontSize: 10, padding: '2px 6px', borderRadius: 3, color: item.v ? '#10b981' : '#475569', background: item.v ? 'rgba(16,185,129,.07)' : 'transparent' }}>{item.v ? '✅' : '❌'} {bdLabels[item.k] || item.k}</span>;
+                  })}
+                </div>
+              )}
               {ud.best_entry != null && (
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 0, marginBottom: 12, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
                   {[
@@ -2454,8 +2463,8 @@ function SmcTab(props) {
               {ud.reasoning && (
                 <div style={{ fontSize: 11, color: 'var(--muted)', fontStyle: 'italic', marginBottom: 12, borderLeft: '2px solid var(--border)', paddingLeft: 8 }}>{ud.reasoning}</div>
               )}
-              {/* Options Flow */}
-              {(function() {
+              {/* Options Flow — Expert seulement */}
+              {expertMode && (function() {
                 var od = ud.options_data;
                 if (!od || od.error || !od.overall_direction) return null;
                 var dirColor = od.overall_direction === 'BULLISH' ? '#10b981' : od.overall_direction === 'BEARISH' ? '#ef4444' : 'var(--muted)';
@@ -2720,21 +2729,30 @@ function SmcTab(props) {
                   })}
                 </div>
 
-                {/* Confluences */}
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>CONFLUENCES ({cf.count}/6)</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {(cf.details || []).map(function(d, i) {
-                      var ok = d.startsWith('✅');
-                      return (
-                        <span key={i} style={{ fontSize: 10, color: ok ? '#10b981' : 'var(--muted)', background: ok ? 'rgba(16,185,129,.06)' : 'transparent', padding: '2px 0' }}>{d}</span>
-                      );
+                {/* Confluences — Expert seulement ; Simple → badge compact */}
+                {!expertMode ? (
+                  <div style={{ marginBottom: 12 }}>
+                    <span style={{ fontSize: 10, color: 'var(--muted)' }}>Confluences : </span>
+                    {(cf.details || []).filter(function(d) { return d.startsWith('✅'); }).map(function(d, i) {
+                      return <span key={i} style={{ fontSize: 10, color: '#10b981', background: 'rgba(16,185,129,.06)', borderRadius: 3, padding: '1px 5px', marginLeft: 4 }}>{d.replace('✅ ', '')}</span>;
                     })}
                   </div>
-                </div>
+                ) : (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>CONFLUENCES ({cf.count}/6)</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {(cf.details || []).map(function(d, i) {
+                        var ok = d.startsWith('✅');
+                        return (
+                          <span key={i} style={{ fontSize: 10, color: ok ? '#10b981' : 'var(--muted)', background: ok ? 'rgba(16,185,129,.06)' : 'transparent', padding: '2px 0' }}>{d}</span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
-                {/* Options Flow (depuis /api/analysis) */}
-                {(function() {
+                {/* Options Flow (depuis /api/analysis) — Expert seulement */}
+                {expertMode && (function() {
                   var od = analysis && analysis.options_data;
                   if (!od || od.error || !od.overall_direction) return null;
                   var dirColor = od.overall_direction === 'BULLISH' ? '#10b981' : od.overall_direction === 'BEARISH' ? '#ef4444' : 'var(--muted)';
@@ -2793,7 +2811,7 @@ function SmcTab(props) {
                     {su.reasoning}
                   </div>
                 )}
-                {su.invalidation && (
+                {expertMode && su.invalidation && (
                   <div style={{ fontSize: 11, color: 'var(--bear)', marginBottom: 12 }}>Invalidation : {su.invalidation}</div>
                 )}
 
@@ -2812,12 +2830,14 @@ function SmcTab(props) {
                 <div style={{ color: 'var(--muted)', fontSize: 12 }}>
                   {su.reasoning || 'Conditions non réunies pour un trade'}
                 </div>
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>CONFLUENCES ({cf.count}/6)</div>
-                  {(cf.details || []).map(function(d, i) {
-                    return <div key={i} style={{ fontSize: 11, color: d.startsWith('✅') ? '#10b981' : 'var(--muted)' }}>{d}</div>;
-                  })}
-                </div>
+                {expertMode && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6, letterSpacing: 1 }}>CONFLUENCES ({cf.count}/6)</div>
+                    {(cf.details || []).map(function(d, i) {
+                      return <div key={i} style={{ fontSize: 11, color: d.startsWith('✅') ? '#10b981' : 'var(--muted)' }}>{d}</div>;
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -5633,6 +5653,7 @@ function TradingDashboard() {
     setSmcForceTicker(ticker);
     setTab('smc');
     loadSmcAnalysis(ticker);
+    loadUnifiedAnalysis(ticker);
   }
 
   var fmtTime = function(d) { return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
