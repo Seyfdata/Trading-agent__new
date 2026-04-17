@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/scheour/.claude/**)",
+      "Bash(gh repo:*)",
+      "Bash(curl -s https://raw.githubusercontent.com/affaan-m/everything-claude-code/main/README.md)",
+      "WebFetch(domain:github.com)",
+      "Bash(npm --version)",
+      "Bash(git --version)",
+      "Bash(cmd.exe /c \"node --version && npm --version && git --version\")",
+      "Bash(powershell.exe -Command \"node --version; npm --version; git --version\")",
+      "Bash(powershell.exe -Command \"winget --version\")"
+    ]
+  }
+}

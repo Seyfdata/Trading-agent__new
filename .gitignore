@@ -40,3 +40,7 @@ desktop.ini
 # Données temporaires
 *.tmp
 *.bak
+*.zip
+
+# Claude Code — config locale (contient des permissions spécifiques à la machine)
+.claude/settings.local.json
