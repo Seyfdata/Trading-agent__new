@@ -475,20 +475,11 @@ def get_reddit_discoveries(
 _DIRECT_CACHE: dict = {"data": None, "expires": 0.0}
 
 
-def scan_reddit_direct(cache_ttl: int = 1800) -> dict:
+def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
     """
-    Scrape directement Reddit (JSON public) — source principale pour /api/reddit.
-    Plus rapide et fiable que le subprocess RedditScanner (pas de CSV intermédiaire).
-
-    Retourne {
-      watchlist_results: [{ticker, mentions, net_sentiment, sentiment_label,
-                            trade_style, subreddits, in_watchlist, verified, ...}],
-      discovery_results: [...],   # tickers hors watchlist, triés par mentions
-      scanned_at: str,
-      total_posts: int,
-      from_cache: bool
-    }
-    TTL cache : cache_ttl secondes (défaut 30 min).
+    Implémentation interne du scan Reddit direct.
+    Retourne un dict complet avec watchlist_results, discovery_results et métadonnées.
+    Utilisé par scan_reddit_direct() (wrapper public → tuple).
     """
     import requests
     import re
@@ -630,6 +621,23 @@ def scan_reddit_direct(cache_ttl: int = 1800) -> dict:
     _DIRECT_CACHE["expires"] = now + cache_ttl
 
     return result
+
+
+def scan_reddit_direct(cache_ttl: int = 1800):
+    """
+    Scrape le JSON public Reddit (7 subreddits) et retourne (watchlist_results, discovery_results).
+    Source principale pour /api/reddit — pas de CSV, pas de subprocess.
+
+    Args:
+        cache_ttl: durée du cache en secondes (défaut 30 min). 0 = scan frais forcé.
+
+    Returns:
+        tuple: (watchlist_results, discovery_results)
+            watchlist_results : liste des 22 tickers watchlist (y compris à 0 mentions)
+            discovery_results : tickers hors watchlist triés par mentions décroissantes
+    """
+    result = _scan_reddit_impl(cache_ttl)
+    return (result["watchlist_results"], result["discovery_results"])
 
 
 # === TEST ===

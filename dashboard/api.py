@@ -81,7 +81,7 @@ from scrapers.rss_news import fetch_and_filter
 from scrapers.macro_calendar import (
     detect_recurring_events, check_earnings_today, get_trading_recommendation,
 )
-from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv, is_known_ticker, scan_reddit_direct
+from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv, is_known_ticker, scan_reddit_direct, _DIRECT_CACHE as _REDDIT_CACHE
 from analysis.scoring import score_ticker, score_market_context, rank_tickers
 from analysis.reddit_trend import get_reddit_trends, save_today_snapshot, verify_ticker
 from database.models import (
@@ -183,6 +183,20 @@ def _reddit_map_from_csv(scanner_dir) -> dict:
         return result
     except Exception:
         return {}
+
+
+def _reddit_map_from_direct(watchlist_results: list) -> dict:
+    """Convertit les watchlist_results de scan_reddit_direct en {ticker: {mentions, sentiment}}."""
+    result = {}
+    for r in watchlist_results:
+        ticker = r.get("ticker", "")
+        if not ticker:
+            continue
+        mentions = int(r.get("mentions", 0))
+        net_sent = float(r.get("net_sentiment", 0))
+        sentiment = max(-1.0, min(1.0, net_sent / max(mentions, 1)))
+        result[ticker] = {"mentions": mentions, "sentiment": sentiment}
+    return result
 
 
 def _news_map_from_lists(ticker_news: list, keyword_news: list) -> dict:
@@ -341,10 +355,27 @@ def get_reddit():
     """
     try:
         # ── Source principale : scan direct Reddit ────────────────────────────
-        direct = scan_reddit_direct(cache_ttl=1800)
-        wl_rows = direct["watchlist_results"]
+        wl_rows, disc_rows = scan_reddit_direct(cache_ttl=1800)
+        meta = (_REDDIT_CACHE.get("data") or {})
 
-        # Ajouter les tickers temporaires manquants
+        # ── Fusion buzztickr : ajouter les mentions watchlist depuis buzztickr ─
+        from scrapers.reddit import scan_buzztickers, TICKER_BLACKLIST as _BL
+        watchlist_set = set(t.upper() for t in WATCHLIST)
+        try:
+            buzz = scan_buzztickers()
+            wl_idx = {r["ticker"]: r for r in wl_rows}
+            for br in buzz:
+                tk = br["ticker"]
+                if tk in _BL or tk not in watchlist_set:
+                    continue
+                if tk in wl_idx:
+                    wl_idx[tk]["mentions"] = wl_idx[tk]["mentions"] + br["mentions"]
+                    if "buzztickr" not in wl_idx[tk].get("subreddits", []):
+                        wl_idx[tk].setdefault("subreddits", []).append("buzztickr")
+        except Exception as e_buzz:
+            print(f"[/api/reddit] buzztickr merge erreur : {e_buzz}")
+
+        # ── Ajouter les tickers temporaires manquants ─────────────────────────
         temp_tickers = set(t["ticker"].upper() for t in _TEMP_WATCHLIST.values())
         found_tickers = {r["ticker"] for r in wl_rows}
         for tk in sorted(temp_tickers):
@@ -362,20 +393,22 @@ def get_reddit():
         for r in wl_rows:
             r["is_temp"] = r["ticker"] in temp_tickers
 
-        discoveries_count = len(direct["discovery_results"])
+        discoveries_count = len(disc_rows)
+        from_cache = meta.get("from_cache", False)
+        scanned_at = meta.get("scanned_at", datetime.now().isoformat())
 
         print(f"[/api/reddit] scan_reddit_direct → "
-              f"{sum(1 for r in wl_rows if r['mentions'] > 0)} actifs, "
+              f"{sum(1 for r in wl_rows if r.get('mentions', 0) > 0)} actifs, "
               f"{discoveries_count} trouvailles, "
-              f"cache={direct['from_cache']}")
+              f"cache={from_cache}")
 
         return clean_for_json({
             "count":             len(wl_rows),
             "data":              wl_rows,
-            "updated_at":        direct["scanned_at"],
+            "updated_at":        scanned_at,
             "discoveries_count": discoveries_count,
             "source":            "reddit_direct",
-            "from_cache":        direct["from_cache"],
+            "from_cache":        from_cache,
         })
 
     except Exception as e:
@@ -492,40 +525,65 @@ def get_reddit():
 @app.get("/api/reddit/discoveries")
 def get_reddit_discoveries_endpoint():
     """
-    Scan Reddit + r/buzztickr pour les tickers hors watchlist.
-    Pas de filtre market_cap pour buzztickr. Enrichissement léger (prix/variation).
+    Tickers hors watchlist détectés via scan_reddit_direct() + r/buzztickr.
+    Source : discovery_results de scan_reddit_direct (cache 30 min) + buzztickr fusion.
     """
     try:
-        from scrapers.reddit import get_reddit_discoveries
-        discoveries = get_reddit_discoveries()
+        from scrapers.reddit import scan_buzztickers, TICKER_BLACKLIST as _BL
+        watchlist_set = set(t.upper() for t in WATCHLIST)
 
-        if not discoveries:
-            # Fallback : retourner les tickers buzztickr bruts si tout est vide
-            from scrapers.reddit import scan_buzztickers, TICKER_BLACKLIST
-            from config.settings import WATCHLIST
-            watchlist_set = set(WATCHLIST)
+        # ── Source principale : discovery_results du scan direct ──────────────
+        _, disc_rows = scan_reddit_direct(cache_ttl=1800)
+
+        # ── Fusion buzztickr (non-watchlist uniquement) ───────────────────────
+        try:
             buzz = scan_buzztickers()
-            fallback = [
-                {"ticker": r["ticker"], "mentions": r["mentions"], "source": "buzztickers",
-                 "net_sentiment": 0, "sentiment_label": "NEUTRAL", "trade_style": "?",
-                 "subreddits": [], "verified": False, "price": None, "change_pct": None,
-                 "dist_sma200": None, "vol_relative": None,
-                 "market_cap": None, "market_cap_str": None, "sector": None,
-                 "unfiltered": True}
-                for r in buzz
-                if r["ticker"] not in TICKER_BLACKLIST and r["ticker"] not in watchlist_set
-            ][:10]
-            return clean_for_json({
-                "discoveries":   fallback,
-                "scan_date":     datetime.now().isoformat(),
-                "total_scanned": len(fallback),
-                "fallback":      True,
-            })
+            disc_idx = {d["ticker"]: d for d in disc_rows}
+            for br in buzz:
+                tk = br["ticker"]
+                if tk in _BL or tk in watchlist_set:
+                    continue
+                if tk in disc_idx:
+                    disc_idx[tk]["mentions"] += br["mentions"]
+                    disc_idx[tk]["source"] = "both"
+                else:
+                    disc_idx[tk] = {
+                        "ticker": tk, "mentions": br["mentions"],
+                        "net_sentiment": 0, "sentiment_label": "NEUTRAL",
+                        "trade_style": "?", "subreddits": [],
+                        "source": "buzztickers", "verified": False,
+                        "price": None, "change_pct": None,
+                        "dist_sma200": None, "vol_relative": None,
+                        "market_cap": None, "market_cap_str": None, "sector": None,
+                        "in_watchlist": False,
+                    }
+            disc_rows = sorted(disc_idx.values(),
+                               key=lambda x: (x.get("source") == "both", x.get("mentions", 0)),
+                               reverse=True)[:20]
+        except Exception as e_buzz:
+            print(f"[/api/reddit/discoveries] buzztickr erreur : {e_buzz}")
+
+        # ── Enrichissement léger : price + change_pct via yfinance ───────────
+        if _YF_AVAILABLE:
+            for d in disc_rows[:10]:
+                if d.get("price") is not None:
+                    continue
+                try:
+                    hist = _yf.Ticker(d["ticker"]).history(period="5d", interval="1d")
+                    if hist is not None and len(hist) >= 1:
+                        d["price"] = round(float(hist["Close"].iloc[-1]), 2)
+                        if len(hist) >= 2:
+                            pc = float(hist["Close"].iloc[-2])
+                            lc = float(hist["Close"].iloc[-1])
+                            if pc > 0:
+                                d["change_pct"] = round((lc - pc) / pc * 100, 2)
+                except Exception:
+                    pass
 
         return clean_for_json({
-            "discoveries":   discoveries,
+            "discoveries":   disc_rows,
             "scan_date":     datetime.now().isoformat(),
-            "total_scanned": len(discoveries),
+            "total_scanned": len(disc_rows),
         })
     except Exception as e:
         import traceback
@@ -795,7 +853,7 @@ def monitor_positions():
 
 @app.post("/api/refresh")
 def refresh():
-    """Scan complet synchrone : market + Reddit subprocess + news + scoring + DB.
+    """Scan complet synchrone : market + Reddit direct + news + scoring + DB.
     Bloque jusqu'à la fin (~30-60s). Retourne {"status": "ok", "duration": X}.
     """
     t0 = time.time()
@@ -808,30 +866,21 @@ def refresh():
         scoring_ctx = _extract_scoring_ctx(context or {})
         ctx_scored = score_market_context(scoring_ctx)
 
-        # 2. Reddit subprocess (lance un vrai scan frais)
-        if REDDIT_SCANNER.exists():
-            try:
-                subprocess.run(
-                    [sys.executable, str(REDDIT_SCANNER),
-                     "--refresh", "--cache-ttl", "1800", "--prefer-new"],
-                    capture_output=True, text=True, timeout=90,
-                )
-            except subprocess.TimeoutExpired:
-                print("[API /refresh] Reddit scanner timeout (>90s)")
-            except Exception as e:
-                print(f"[API /refresh] Reddit scanner erreur : {e}")
-        else:
-            print(f"[API /refresh] RedditScanner introuvable : {REDDIT_SCANNER}")
+        # 2. Reddit direct (cache_ttl=0 → scan frais, invalide le cache)
+        try:
+            wl_reddit, _ = scan_reddit_direct(cache_ttl=0)
+            reddit_map = _reddit_map_from_direct(wl_reddit)
+            active = sum(1 for r in wl_reddit if r.get("mentions", 0) > 0)
+            print(f"[API /refresh] Reddit direct : {active}/{len(wl_reddit)} tickers actifs")
+        except Exception as e_rd:
+            print(f"[API /refresh] Reddit direct erreur : {e_rd} — reddit_map vide")
+            reddit_map = {}
 
         # 3. News
         _, ticker_news, keyword_news, _ = fetch_and_filter(max_per_feed=5)
         news_map = _news_map_from_lists(ticker_news, keyword_news)
 
-        # 4. Reddit map depuis le CSV mis à jour par le subprocess
-        scanner_dir = find_scanner_dir()
-        reddit_map = _reddit_map_from_csv(scanner_dir)
-
-        # 5. Scoring
+        # 4. Scoring
         scored_list = []
         for r in (scan or []):
             if "error" in r:
