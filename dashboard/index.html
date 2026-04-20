@@ -2925,6 +2925,205 @@ function _gradeColor(grade) {
   return '#64748b';
 }
 
+// ── Pullback Scanner Tab ──────────────────────────────────────────────────────
+function PullbackTab(props) {
+  var onGoToSmc = props.onGoToSmc;
+
+  var pbState   = React.useState(null);   var pbData    = pbState[0];   var setPbData    = pbState[1];
+  var ldState   = React.useState(false);  var loading   = ldState[0];   var setLoading   = ldState[1];
+  var errState  = React.useState(null);   var pbError   = errState[0];  var setPbError   = errState[1];
+
+  function loadPullbacks() {
+    setLoading(true);
+    setPbError(null);
+    fetch('/api/pullbacks')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setPbData(d); setLoading(false); })
+      .catch(function(e) { setPbError('Erreur: ' + e.message); setLoading(false); });
+  }
+
+  React.useEffect(function() { loadPullbacks(); }, []);
+
+  var alerts   = (pbData && pbData.alerts)   || [];
+  var watches  = (pbData && pbData.watches)  || [];
+  var noAlerts = (pbData && pbData.no_alerts)|| [];
+  var ctx      = (pbData && pbData.market_context) || {};
+  var summary  = (pbData && pbData.summary) || {};
+
+  var ctxColor = ctx.breadth === 'bullish' ? '#10b981' : ctx.breadth === 'bearish' ? '#ef4444' : '#f59e0b';
+
+  function statusColor(s) {
+    if (s === 'alert')     return '#ef4444';
+    if (s === 'watch')     return '#f59e0b';
+    if (s === 'overbought') return '#a78bfa';
+    return '#64748b';
+  }
+  function condBar(n) {
+    var dots = [];
+    for (var i = 0; i < 3; i++) {
+      dots.push(React.createElement('span', { key: i, style: { display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: i < n ? '#ef4444' : '#334155', marginRight: 3 } }));
+    }
+    return React.createElement('span', null, dots);
+  }
+
+  return React.createElement('div', { className: 'tab-content' },
+
+    /* Header */
+    React.createElement('div', { className: 'card mb24' },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 } },
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontWeight: 700, fontSize: 16 } }, '📉 Pullback Scanner'),
+          React.createElement('div', { className: 'mc', style: { fontSize: 12, marginTop: 4 } },
+            'RSI < 35  ·  BB%B < 0  ·  Stoch %K < 20'
+          )
+        ),
+        React.createElement('button', { className: 'btn btn-p', onClick: loadPullbacks, disabled: loading, style: loading ? { opacity: 0.65, cursor: 'not-allowed' } : {} },
+          loading ? React.createElement('span', null, React.createElement('span', { className: 'spin-anim' }, '⟳'), ' Scan en cours...') : '🔍 Scanner pullbacks'
+        )
+      ),
+      pbData && React.createElement('div', { className: 'mc', style: { fontSize: 11, marginTop: 10 } },
+        'Scanné à ', new Date(pbData.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        '  ·  ', pbData.tickers_scanned, ' tickers'
+      )
+    ),
+
+    /* Error */
+    pbError && React.createElement('div', { className: 'card', style: { color: '#ef4444', marginBottom: 16 } }, pbError),
+
+    /* Market Breadth Context */
+    pbData && React.createElement('div', { className: 'card mb24', style: { borderLeft: '4px solid ' + ctxColor } },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 } },
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontWeight: 700, fontSize: 13 } }, 'Contexte marché S&P 500 (50 titres)'),
+          React.createElement('div', { className: 'mc', style: { fontSize: 12, marginTop: 4 } }, ctx.interpretation)
+        ),
+        React.createElement('div', { style: { textAlign: 'right' } },
+          React.createElement('div', { style: { fontWeight: 700, color: ctxColor, fontSize: 15 } }, (ctx.breadth || 'unknown').toUpperCase()),
+          React.createElement('div', { className: 'mc', style: { fontSize: 11 } }, 'A/D: ', ctx.ad_ratio, '  (', ctx.advancers, ' ↑ / ', ctx.decliners, ' ↓)')
+        )
+      )
+    ),
+
+    /* Summary badges */
+    pbData && React.createElement('div', { style: { display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 } },
+      React.createElement('div', { className: 'badge', style: { background: '#ef444422', color: '#ef4444', border: '1px solid #ef4444' } },
+        '🚨 Alertes: ', summary.alert_count || 0
+      ),
+      React.createElement('div', { className: 'badge', style: { background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b' } },
+        '👁 À surveiller: ', summary.watch_count || 0
+      ),
+      React.createElement('div', { className: 'badge', style: { background: '#1e293b', color: '#64748b', border: '1px solid #334155' } },
+        '⬜ Neutres: ', summary.neutral_count || 0
+      )
+    ),
+
+    /* Alert cards */
+    alerts.length > 0 && React.createElement('div', { style: { marginBottom: 24 } },
+      React.createElement('div', { style: { fontWeight: 700, fontSize: 14, marginBottom: 12, color: '#ef4444' } }, '🚨 Alertes survente'),
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 } },
+        alerts.map(function(item) {
+          return React.createElement('div', { key: item.ticker, className: 'card', style: { borderLeft: '4px solid #ef4444' } },
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 } },
+              React.createElement('div', null,
+                React.createElement('span', { style: { fontWeight: 700, fontSize: 16 } }, item.ticker),
+                React.createElement('span', { style: { marginLeft: 8, fontSize: 12, color: item.change_pct >= 0 ? '#10b981' : '#ef4444' } },
+                  (item.change_pct >= 0 ? '+' : '') + (item.change_pct || 0).toFixed(2) + '%'
+                )
+              ),
+              React.createElement('span', { style: { fontWeight: 700, fontSize: 15 } }, '$' + (item.price || 0).toFixed(2))
+            ),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 } },
+              React.createElement('span', { className: 'mc', style: { fontSize: 11 } }, 'Conditions:'),
+              condBar(item.conditions_met),
+              React.createElement('span', { style: { fontSize: 11, color: statusColor(item.status) } }, item.conditions_met + '/3')
+            ),
+            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, marginBottom: 10 } },
+              React.createElement('div', { style: { textAlign: 'center', background: item.rsi_oversold ? '#ef444422' : '#1e293b', borderRadius: 6, padding: '4px 2px' } },
+                React.createElement('div', { style: { fontSize: 10, color: '#94a3b8' } }, 'RSI'),
+                React.createElement('div', { style: { fontWeight: 700, fontSize: 13, color: item.rsi_oversold ? '#ef4444' : 'var(--text)' } }, item.rsi ? item.rsi.toFixed(1) : '—')
+              ),
+              React.createElement('div', { style: { textAlign: 'center', background: item.bb_below_lower ? '#ef444422' : '#1e293b', borderRadius: 6, padding: '4px 2px' } },
+                React.createElement('div', { style: { fontSize: 10, color: '#94a3b8' } }, 'BB%B'),
+                React.createElement('div', { style: { fontWeight: 700, fontSize: 13, color: item.bb_below_lower ? '#ef4444' : 'var(--text)' } }, item.bb_percent_b != null ? item.bb_percent_b.toFixed(2) : '—')
+              ),
+              React.createElement('div', { style: { textAlign: 'center', background: item.stoch_oversold ? '#ef444422' : '#1e293b', borderRadius: 6, padding: '4px 2px' } },
+                React.createElement('div', { style: { fontSize: 10, color: '#94a3b8' } }, 'Stoch'),
+                React.createElement('div', { style: { fontWeight: 700, fontSize: 13, color: item.stoch_oversold ? '#ef4444' : 'var(--text)' } }, item.stoch_k ? item.stoch_k.toFixed(1) : '—')
+              )
+            ),
+            React.createElement('div', { className: 'mc', style: { fontSize: 11, marginBottom: 10 } }, item.interpretation),
+            React.createElement('div', { style: { display: 'flex', gap: 6 } },
+              React.createElement('button', { className: 'btn btn-p', style: { fontSize: 11, padding: '4px 10px' },
+                onClick: function() { if (onGoToSmc) onGoToSmc(item.ticker); } },
+                '🧠 Analyser SMC'
+              ),
+              React.createElement('a', { href: 'https://www.tradingview.com/chart/?symbol=' + item.ticker, target: '_blank',
+                className: 'btn', style: { fontSize: 11, padding: '4px 10px', textDecoration: 'none' } },
+                '📈 TradingView'
+              )
+            )
+          );
+        })
+      )
+    ),
+
+    /* Watch list */
+    watches.length > 0 && React.createElement('div', { style: { marginBottom: 24 } },
+      React.createElement('div', { style: { fontWeight: 700, fontSize: 14, marginBottom: 12, color: '#f59e0b' } }, '👁 À surveiller'),
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 } },
+        watches.map(function(item) {
+          return React.createElement('div', { key: item.ticker, className: 'card', style: { borderLeft: '4px solid ' + statusColor(item.status) } },
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 } },
+              React.createElement('div', null,
+                React.createElement('span', { style: { fontWeight: 700, fontSize: 15 } }, item.ticker),
+                React.createElement('span', { className: 'badge', style: { marginLeft: 8, background: statusColor(item.status) + '22', color: statusColor(item.status), border: '1px solid ' + statusColor(item.status), fontSize: 10, padding: '2px 7px' } }, item.status)
+              ),
+              React.createElement('span', { style: { fontWeight: 600, fontSize: 14 } }, '$' + (item.price || 0).toFixed(2))
+            ),
+            React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 4, marginBottom: 8 } },
+              React.createElement('div', { style: { textAlign: 'center', background: '#1e293b', borderRadius: 5, padding: '3px 2px' } },
+                React.createElement('div', { style: { fontSize: 10, color: '#94a3b8' } }, 'RSI'),
+                React.createElement('div', { style: { fontWeight: 600, fontSize: 12 } }, item.rsi ? item.rsi.toFixed(1) : '—')
+              ),
+              React.createElement('div', { style: { textAlign: 'center', background: '#1e293b', borderRadius: 5, padding: '3px 2px' } },
+                React.createElement('div', { style: { fontSize: 10, color: '#94a3b8' } }, 'BB%B'),
+                React.createElement('div', { style: { fontWeight: 600, fontSize: 12 } }, item.bb_percent_b != null ? item.bb_percent_b.toFixed(2) : '—')
+              ),
+              React.createElement('div', { style: { textAlign: 'center', background: '#1e293b', borderRadius: 5, padding: '3px 2px' } },
+                React.createElement('div', { style: { fontSize: 10, color: '#94a3b8' } }, 'Stoch'),
+                React.createElement('div', { style: { fontWeight: 600, fontSize: 12 } }, item.stoch_k ? item.stoch_k.toFixed(1) : '—')
+              )
+            ),
+            React.createElement('div', { style: { display: 'flex', gap: 6 } },
+              React.createElement('button', { className: 'btn btn-p', style: { fontSize: 10, padding: '3px 8px' },
+                onClick: function() { if (onGoToSmc) onGoToSmc(item.ticker); } },
+                '🧠 SMC'
+              ),
+              React.createElement('a', { href: 'https://www.tradingview.com/chart/?symbol=' + item.ticker, target: '_blank',
+                className: 'btn', style: { fontSize: 10, padding: '3px 8px', textDecoration: 'none' } },
+                '📈 TV'
+              )
+            )
+          );
+        })
+      )
+    ),
+
+    /* Empty state */
+    pbData && !loading && alerts.length === 0 && watches.length === 0 && React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 32 } },
+      React.createElement('div', { style: { fontSize: 32, marginBottom: 8 } }, '✅'),
+      React.createElement('div', { style: { fontWeight: 700, marginBottom: 4 } }, 'Aucune survente détectée'),
+      React.createElement('div', { className: 'mc', style: { fontSize: 13 } }, 'Tous les tickers sont hors zone de survente. Marché: ', (ctx.breadth || 'unknown').toUpperCase())
+    ),
+
+    /* Loading state */
+    loading && React.createElement('div', { style: { textAlign: 'center', padding: 48, color: '#64748b' } },
+      React.createElement('span', { className: 'spin-anim', style: { fontSize: 24 } }, '⟳'),
+      React.createElement('div', { style: { marginTop: 12 } }, 'Scan de ', 22, ' tickers en cours...')
+    )
+  );
+}
+
 function SetupsTab(props) {
   var setupsData    = props.setupsData;
   var setupsLoading = props.setupsLoading;
@@ -5250,6 +5449,7 @@ var TABS = [
   { id: 'news',      label: '📰 News'             },
   { id: 'alerts',    label: '⚡ Alertes'          },
   { id: 'setups',    label: '🎯 Setups'           },
+  { id: 'pullback',  label: '📉 Pullback'         },
   { id: 'smc',       label: '🧠 Analyse SMC'      },
   { id: 'journal',   label: '📝 Journal'          },
   { id: 'history',   label: '📊 Performance'      },
@@ -5728,6 +5928,7 @@ function TradingDashboard() {
         {tab === 'news'      && <NewsTab      data={data} />}
         {tab === 'alerts'    && <AlertsTab alertData={alertData} liveNews={liveNews} countdown={(alertData.in_killzone || testMode) ? countdown : null} testMode={testMode} onSimulate={activateTestMode} posMonitor={posMonitor} />}
         {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} onAnalyzeTk={analyzeDiscovery} />}
+        {tab === 'pullback'  && <PullbackTab onGoToSmc={function(ticker) { setSmcForceTicker(ticker); setTab('smc'); }} />}
         {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} unifiedData={unifiedData} unifiedLoading={unifiedLoading} scanResults={scanResults} scanLoading={scanLoading} extraTickers={extraTickers} forceTicker={smcForceTicker} onClearForceTicker={function() { setSmcForceTicker(null); }} onAnalyze={loadSmcAnalysis} onUnified={loadUnifiedAnalysis} onScan={loadScanUnified} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
         {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} prefillTrade={prefillTrade} onClearPrefill={function() { setPrefillTrade(null); }} /></ErrorBoundary>}
         {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}

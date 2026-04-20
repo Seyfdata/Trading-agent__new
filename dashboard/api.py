@@ -849,6 +849,41 @@ def monitor_positions():
         return {"error": str(e), "positions": [], "alerts": []}
 
 
+# ── Pullback Scanner ─────────────────────────────────────────────────────────
+
+@app.get("/api/indicators/{ticker}")
+def get_indicators(ticker: str):
+    """Indicateurs techniques complets pour un ticker (RSI, BB, Stoch, ADX, MACD, MAs)."""
+    try:
+        from analysis.technical_indicators import analyze_ticker
+        return clean_for_json(analyze_ticker(ticker.upper()))
+    except Exception as e:
+        print(f"[API] /api/indicators/{ticker} error: {e}")
+        return {"error": str(e), "ticker": ticker}
+
+
+@app.get("/api/breadth")
+def get_breadth():
+    """Ampleur du marché (50 top S&P 500) : advancers/decliners, A/D ratio."""
+    try:
+        from analysis.market_breadth import get_market_breadth
+        return clean_for_json(get_market_breadth())
+    except Exception as e:
+        print(f"[API] /api/breadth error: {e}")
+        return {"error": str(e), "ad_ratio": 1.0, "breadth_strength": "unknown"}
+
+
+@app.get("/api/pullbacks")
+def get_pullbacks():
+    """Scan de survente sur la watchlist (RSI<35, BB%B<0, Stoch<20) + contexte marché."""
+    try:
+        from analysis.pullback_scanner import scan_pullbacks
+        return clean_for_json(scan_pullbacks())
+    except Exception as e:
+        print(f"[API] /api/pullbacks error: {e}")
+        return {"error": str(e), "alerts": [], "watches": [], "no_alerts": []}
+
+
 # ── Refresh (scan complet synchrone) ─────────────────────────────────────────
 
 @app.post("/api/refresh")
