@@ -2925,6 +2925,229 @@ function _gradeColor(grade) {
   return '#64748b';
 }
 
+// ── Relative Strength Scout Tab ──────────────────────────────────────────────
+function RelStrengthTab(props) {
+  var onGoToSmc = props.onGoToSmc;
+
+  var dataState    = React.useState(null);   var rsData   = dataState[0];   var setRsData   = dataState[1];
+  var loadState    = React.useState(false);  var loading  = loadState[0];   var setLoading  = loadState[1];
+  var errState     = React.useState(null);   var rsError  = errState[0];    var setRsError  = errState[1];
+  var periodState  = React.useState('1m');   var period   = periodState[0]; var setPeriod   = periodState[1];
+  var topNState    = React.useState(2);      var topN     = topNState[0];   var setTopN     = topNState[1];
+
+  function loadRS(p, n) {
+    var per = p || period;
+    var num = n !== undefined ? n : topN;
+    setLoading(true);
+    setRsError(null);
+    fetch('/api/relative-strength?period=' + per + '&top=' + num)
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setRsData(d); setLoading(false); })
+      .catch(function(e) { setRsError('Erreur: ' + e.message); setLoading(false); });
+  }
+
+  React.useEffect(function() {
+    loadRS(period, topN);
+    var timer = setInterval(function() { loadRS(period, topN); }, 600000);
+    return function() { clearInterval(timer); };
+  }, [period, topN]);
+
+  var ranking      = (rsData && rsData.ranking)      || [];
+  var deepAnalyses = (rsData && rsData.deep_analyses) || [];
+  var comparative  = (rsData && rsData.comparative_verdict) || '';
+  var summary      = (rsData && rsData.summary)      || {};
+
+  function verdictBadge(v) {
+    if (v === 'outperforming')  return { bg: '#10b98122', color: '#10b981', border: '1px solid #10b981', label: '🟢 Outperf' };
+    if (v === 'underperforming') return { bg: '#ef444422', color: '#ef4444', border: '1px solid #ef4444', label: '🔴 Underp' };
+    return { bg: '#1e293b', color: '#94a3b8', border: '1px solid #334155', label: '⬜ In line' };
+  }
+
+  function alphaColor(v) {
+    if (v == null) return '#94a3b8';
+    return v >= 2 ? '#10b981' : v <= -2 ? '#ef4444' : '#f59e0b';
+  }
+
+  function sigIcon(sig, key) {
+    if (!sig) return '•';
+    if (key === 'rsi')          return sig.warning ? '⚠️' : (sig.value != null && sig.value < 40 ? '🔴' : '✅');
+    if (key === 'macd')         return sig.direction === 'bullish' ? '✅' : sig.direction === 'bearish' ? '🔴' : '•';
+    if (key === 'mas')          return sig.value === 'above_all' ? '✅' : sig.value === 'below_all' ? '🔴' : '•';
+    if (key === 'bollinger')    return sig.warning ? '⚠️' : (sig.value != null && sig.value < 0 ? '🔴' : '✅');
+    if (key === 'adx')          return sig.strong ? '✅' : (sig.value != null && sig.value < 20 ? '🔴' : '•');
+    if (key === 'short_interest') return sig.level === 'low' ? '✅' : sig.level === 'high' ? '🔴' : '•';
+    return '•';
+  }
+
+  function DeepCard(d) {
+    var sigs = d.signals || {};
+    var si   = sigs.short_interest || {};
+    var rows = [
+      { key: 'rsi',           label: 'RSI',         val: sigs.rsi     ? (sigs.rsi.value != null ? sigs.rsi.value.toFixed(1) : '—') + '  ' + sigs.rsi.label     : '—' },
+      { key: 'macd',          label: 'MACD',         val: sigs.macd    ? sigs.macd.label                                                                          : '—' },
+      { key: 'mas',           label: 'MAs',          val: sigs.mas     ? sigs.mas.label                                                                           : '—' },
+      { key: 'bollinger',     label: 'Bollinger',    val: sigs.bollinger ? (sigs.bollinger.value != null ? sigs.bollinger.value.toFixed(2) + '  ' : '') + sigs.bollinger.label : '—' },
+      { key: 'adx',           label: 'ADX',          val: sigs.adx     ? (sigs.adx.value != null ? sigs.adx.value.toFixed(1) + '  ' : '') + sigs.adx.label       : '—' },
+      { key: 'short_interest', label: 'Short Int.',  val: si.pct != null ? si.pct.toFixed(1) + '%' + (si.days_to_cover ? ' / ' + si.days_to_cover.toFixed(1) + 'j' : '') + '  ' + si.label : (si.label || '—') },
+    ];
+    return React.createElement('div', { className: 'card', style: { borderLeft: '4px solid #3b82f6', marginBottom: 12 } },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
+        React.createElement('div', null,
+          React.createElement('span', { style: { fontWeight: 700, fontSize: 17 } }, d.ticker),
+          React.createElement('span', { style: { marginLeft: 10, fontSize: 12, color: '#94a3b8', fontStyle: 'italic' } }, d.snapshot || ''),
+          d.change_pct != null && React.createElement('span', { style: { marginLeft: 10, fontSize: 12, color: d.change_pct >= 0 ? '#10b981' : '#ef4444' } },
+            (d.change_pct >= 0 ? '+' : '') + d.change_pct.toFixed(2) + '%'
+          )
+        ),
+        React.createElement('div', { style: { textAlign: 'right' } },
+          React.createElement('div', { style: { fontWeight: 700, fontSize: 15 } }, d.price ? '$' + d.price.toFixed(2) : ''),
+          d.alpha_1m != null && React.createElement('div', { style: { fontSize: 11, color: alphaColor(d.alpha_1m) } },
+            'α 1M: ' + (d.alpha_1m >= 0 ? '+' : '') + d.alpha_1m.toFixed(1) + '%'
+          )
+        )
+      ),
+      React.createElement('div', { style: { display: 'grid', gap: 4, marginBottom: 12 } },
+        rows.map(function(row) {
+          return React.createElement('div', { key: row.key, style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, padding: '3px 0', borderBottom: '1px solid #1e293b' } },
+            React.createElement('span', { style: { width: 20 } }, sigIcon(sigs[row.key], row.key)),
+            React.createElement('span', { style: { color: '#94a3b8', minWidth: 70, fontSize: 11 } }, row.label),
+            React.createElement('span', { style: { color: 'var(--text)' } }, row.val)
+          );
+        })
+      ),
+      d.conclusion && React.createElement('div', { className: 'mc', style: { fontSize: 12, marginBottom: 10, fontStyle: 'italic' } }, d.conclusion),
+      React.createElement('div', { style: { display: 'flex', gap: 6 } },
+        React.createElement('button', { className: 'btn btn-p', style: { fontSize: 11, padding: '4px 10px' },
+          onClick: function() { if (onGoToSmc) onGoToSmc(d.ticker); } }, '🧠 Analyser SMC'),
+        React.createElement('a', { href: 'https://www.tradingview.com/chart/?symbol=' + d.ticker, target: '_blank',
+          className: 'btn', style: { fontSize: 11, padding: '4px 10px', textDecoration: 'none' } }, '📈 TradingView')
+      )
+    );
+  }
+
+  return React.createElement('div', { className: 'tab-content' },
+
+    /* Header */
+    React.createElement('div', { className: 'card mb24' },
+      React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 } },
+        React.createElement('div', null,
+          React.createElement('div', { style: { fontWeight: 700, fontSize: 16 } }, '💪 Relative Strength Scout'),
+          React.createElement('div', { className: 'mc', style: { fontSize: 12, marginTop: 4 } }, 'Classement alpha vs SPY  ·  Deep analysis top N')
+        ),
+        React.createElement('button', { className: 'btn btn-p', onClick: function() { loadRS(period, topN); }, disabled: loading,
+          style: loading ? { opacity: 0.65, cursor: 'not-allowed' } : {} },
+          loading ? React.createElement('span', null, React.createElement('span', { className: 'spin-anim' }, '⟳'), ' Calcul...') : '🔄 Actualiser'
+        )
+      ),
+      rsData && React.createElement('div', { className: 'mc', style: { fontSize: 11, marginTop: 10 } },
+        'Mis à jour : ', new Date(rsData.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        '  ·  ', rsData.tickers_scanned, ' tickers  ·  Benchmark : SPY'
+      )
+    ),
+
+    rsError && React.createElement('div', { className: 'card', style: { color: '#ef4444', marginBottom: 16 } }, rsError),
+
+    /* Contrôles */
+    React.createElement('div', { className: 'card mb24', style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 16 } },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+        React.createElement('span', { className: 'mc', style: { fontSize: 12 } }, 'Période :'),
+        ['1w', '1m', '3m'].map(function(p) {
+          return React.createElement('button', { key: p, onClick: function() { setPeriod(p); },
+            className: 'badge',
+            style: { cursor: 'pointer', background: period === p ? '#3b82f6' : '#1e293b', color: period === p ? '#fff' : '#94a3b8',
+                     border: '1px solid ' + (period === p ? '#3b82f6' : '#334155'), padding: '4px 12px', fontSize: 12 } },
+            p.toUpperCase()
+          );
+        })
+      ),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+        React.createElement('span', { className: 'mc', style: { fontSize: 12 } }, 'Deep analyse top :'),
+        [1, 2, 3, 4, 5].map(function(n) {
+          return React.createElement('button', { key: n, onClick: function() { setTopN(n); },
+            className: 'badge',
+            style: { cursor: 'pointer', background: topN === n ? '#8b5cf6' : '#1e293b', color: topN === n ? '#fff' : '#94a3b8',
+                     border: '1px solid ' + (topN === n ? '#8b5cf6' : '#334155'), padding: '4px 10px', fontSize: 12 } },
+            n
+          );
+        })
+      ),
+      rsData && React.createElement('div', { style: { display: 'flex', gap: 8 } },
+        React.createElement('div', { className: 'badge', style: { background: '#10b98122', color: '#10b981', border: '1px solid #10b981', fontSize: 11 } }, '🟢 ', summary.outperforming || 0),
+        React.createElement('div', { className: 'badge', style: { background: '#1e293b', color: '#94a3b8', border: '1px solid #334155', fontSize: 11 } }, '⬜ ', summary.in_line || 0),
+        React.createElement('div', { className: 'badge', style: { background: '#ef444422', color: '#ef4444', border: '1px solid #ef4444', fontSize: 11 } }, '🔴 ', summary.underperforming || 0)
+      )
+    ),
+
+    /* Table classement */
+    rsData && !loading && ranking.length > 0 && React.createElement('div', { className: 'card mb24' },
+      React.createElement('div', { style: { fontWeight: 700, fontSize: 14, marginBottom: 14 } },
+        'Classement alpha vs SPY — ', period.toUpperCase()
+      ),
+      React.createElement('div', { style: { overflowX: 'auto' } },
+        React.createElement('table', { style: { width: '100%', borderCollapse: 'collapse', fontSize: 13 } },
+          React.createElement('thead', null,
+            React.createElement('tr', { style: { borderBottom: '1px solid #334155' } },
+              ['Rang', 'Ticker', 'α 1W', 'α 1M', 'α 3M', 'Ret. 1M', 'Verdict'].map(function(h) {
+                return React.createElement('th', { key: h, style: { padding: '6px 10px', textAlign: h === 'Rang' ? 'center' : 'left', color: '#64748b', fontWeight: 600, fontSize: 11 } }, h);
+              })
+            )
+          ),
+          React.createElement('tbody', null,
+            ranking.map(function(row) {
+              var vb = verdictBadge(row.verdict);
+              return React.createElement('tr', { key: row.ticker, style: { borderBottom: '1px solid #1e293b' } },
+                React.createElement('td', { style: { padding: '7px 10px', textAlign: 'center', color: '#64748b', fontSize: 12 } }, row.rank),
+                React.createElement('td', { style: { padding: '7px 10px', fontWeight: 700 } }, row.ticker),
+                React.createElement('td', { style: { padding: '7px 10px', color: alphaColor(row.alpha_1w), fontWeight: 600 } },
+                  row.alpha_1w != null ? (row.alpha_1w >= 0 ? '+' : '') + row.alpha_1w.toFixed(1) + '%' : '—'
+                ),
+                React.createElement('td', { style: { padding: '7px 10px', color: alphaColor(row.alpha_1m), fontWeight: 700 } },
+                  row.alpha_1m != null ? (row.alpha_1m >= 0 ? '+' : '') + row.alpha_1m.toFixed(1) + '%' : '—'
+                ),
+                React.createElement('td', { style: { padding: '7px 10px', color: alphaColor(row.alpha_3m), fontWeight: 600 } },
+                  row.alpha_3m != null ? (row.alpha_3m >= 0 ? '+' : '') + row.alpha_3m.toFixed(1) + '%' : '—'
+                ),
+                React.createElement('td', { style: { padding: '7px 10px', color: '#94a3b8', fontSize: 12 } },
+                  row.return_1m != null ? (row.return_1m >= 0 ? '+' : '') + row.return_1m.toFixed(1) + '%' : '—'
+                ),
+                React.createElement('td', { style: { padding: '7px 10px' } },
+                  React.createElement('span', { className: 'badge', style: { background: vb.bg, color: vb.color, border: vb.border, fontSize: 10, padding: '2px 8px' } }, vb.label)
+                )
+              );
+            })
+          )
+        )
+      )
+    ),
+
+    /* Deep analyses */
+    rsData && !loading && deepAnalyses.length > 0 && React.createElement('div', { style: { marginBottom: 24 } },
+      React.createElement('div', { style: { fontWeight: 700, fontSize: 14, marginBottom: 14 } }, 'Analyse approfondie — Top ' + deepAnalyses.length),
+      React.createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 14 } },
+        deepAnalyses.map(function(d) { return DeepCard(d); })
+      )
+    ),
+
+    /* Verdict comparatif */
+    rsData && !loading && comparative && React.createElement('div', { className: 'card', style: { borderLeft: '4px solid #8b5cf6' } },
+      React.createElement('div', { style: { fontWeight: 700, fontSize: 13, marginBottom: 6 } }, 'Conclusion comparative'),
+      React.createElement('div', { className: 'mc', style: { fontSize: 13 } }, comparative)
+    ),
+
+    /* Loading */
+    loading && React.createElement('div', { style: { textAlign: 'center', padding: 48, color: '#64748b' } },
+      React.createElement('span', { className: 'spin-anim', style: { fontSize: 24 } }, '⟳'),
+      React.createElement('div', { style: { marginTop: 12 } }, 'Calcul des alphas en cours...')
+    ),
+
+    /* Empty */
+    rsData && !loading && ranking.length === 0 && React.createElement('div', { className: 'card', style: { textAlign: 'center', padding: 32 } },
+      React.createElement('div', { style: { fontSize: 32, marginBottom: 8 } }, '📊'),
+      React.createElement('div', { style: { fontWeight: 700 } }, 'Aucune donnée disponible')
+    )
+  );
+}
+
 // ── Pullback Scanner Tab ──────────────────────────────────────────────────────
 function PullbackTab(props) {
   var onGoToSmc = props.onGoToSmc;
@@ -5450,6 +5673,7 @@ var TABS = [
   { id: 'alerts',    label: '⚡ Alertes'          },
   { id: 'setups',    label: '🎯 Setups'           },
   { id: 'pullback',  label: '📉 Pullback'         },
+  { id: 'rs_scout',  label: '💪 RS Scout'         },
   { id: 'smc',       label: '🧠 Analyse SMC'      },
   { id: 'journal',   label: '📝 Journal'          },
   { id: 'history',   label: '📊 Performance'      },
@@ -5929,6 +6153,7 @@ function TradingDashboard() {
         {tab === 'alerts'    && <AlertsTab alertData={alertData} liveNews={liveNews} countdown={(alertData.in_killzone || testMode) ? countdown : null} testMode={testMode} onSimulate={activateTestMode} posMonitor={posMonitor} />}
         {tab === 'setups'    && <SetupsTab    setupsData={setupsData} setupsLoading={setupsLoading} onScan={loadSetups} onAnalyzeTk={analyzeDiscovery} />}
         {tab === 'pullback'  && <PullbackTab onGoToSmc={function(ticker) { setSmcForceTicker(ticker); setTab('smc'); }} />}
+        {tab === 'rs_scout'  && <RelStrengthTab onGoToSmc={function(ticker) { setSmcForceTicker(ticker); setTab('smc'); }} />}
         {tab === 'smc'       && <ErrorBoundary><SmcTab smcData={smcData} smcLoading={smcLoading} unifiedData={unifiedData} unifiedLoading={unifiedLoading} scanResults={scanResults} scanLoading={scanLoading} extraTickers={extraTickers} forceTicker={smcForceTicker} onClearForceTicker={function() { setSmcForceTicker(null); }} onAnalyze={loadSmcAnalysis} onUnified={loadUnifiedAnalysis} onScan={loadScanUnified} onAddTrade={handleAddTradeFromSmc} /></ErrorBoundary>}
         {tab === 'journal'   && <ErrorBoundary><JournalTab posMonitor={posMonitor} inKillzone={alertData.in_killzone || testMode} onRefreshPositions={loadPositionMonitor} prefillTrade={prefillTrade} onClearPrefill={function() { setPrefillTrade(null); }} /></ErrorBoundary>}
         {tab === 'history'   && <ErrorBoundary><PerformanceTab /></ErrorBoundary>}

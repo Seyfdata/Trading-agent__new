@@ -884,6 +884,40 @@ def get_pullbacks():
         return {"error": str(e), "alerts": [], "watches": [], "no_alerts": []}
 
 
+@app.get("/api/relative-strength")
+def get_relative_strength(period: str = "1m", top: int = 2):
+    """Classement alpha vs SPY sur 1w/1m/3m + deep analysis top N."""
+    try:
+        from analysis.relative_strength import scan_relative_strength
+        top = max(1, min(5, top))
+        return scan_relative_strength(ranking_period=period, top_n=top)
+    except Exception as e:
+        print(f"[API] /api/relative-strength error: {e}")
+        return {"error": str(e), "ranking": [], "deep_analyses": []}
+
+
+@app.get("/api/alpha/{ticker}")
+def get_alpha(ticker: str):
+    """Alpha vs SPY sur 1w/1m/3m pour un ticker."""
+    try:
+        from analysis.relative_strength import calc_alpha
+        return calc_alpha(ticker.upper())
+    except Exception as e:
+        print(f"[API] /api/alpha/{ticker} error: {e}")
+        return {"error": str(e), "ticker": ticker}
+
+
+@app.get("/api/deep-analysis/{ticker}")
+def get_deep_analysis(ticker: str):
+    """Analyse technique approfondie + labels narratifs pour un ticker."""
+    try:
+        from analysis.relative_strength import deep_analysis
+        return deep_analysis(ticker.upper())
+    except Exception as e:
+        print(f"[API] /api/deep-analysis/{ticker} error: {e}")
+        return {"error": str(e), "ticker": ticker}
+
+
 # ── Refresh (scan complet synchrone) ─────────────────────────────────────────
 
 @app.post("/api/refresh")
