@@ -573,16 +573,22 @@ def _build_setup(
     dp:            dict,
     confluences:   dict,
 ) -> dict:
-    """Construit le setup de trade si les conditions sont réunies."""
+    """Construit le setup de trade si les conditions sont réunies. Enforce R:R >= 2.5."""
+    _reason_no = _no_trade_reason(structure, dp, confluences)
     no_trade = {
-        "has_setup":     False,
-        "direction":     "NO TRADE",
-        "entry":         None,
-        "stop":          None,
-        "target":        None,
-        "rr_ratio":      None,
-        "invalidation":  None,
-        "reasoning":     _no_trade_reason(structure, dp, confluences),
+        "has_setup":        False,
+        "direction":        "NO TRADE",
+        "entry":            None,
+        "stop":             None,
+        "target":           None,
+        "rr_ratio":         None,
+        "rr":               None,
+        "rr_valid":         False,
+        "rr_rule":          "min_2.5",
+        "target_adjusted":  False,
+        "rejection_reason": _reason_no,
+        "invalidation":     None,
+        "reasoning":        _reason_no,
     }
 
     if structure.get("bias") != "BULL":
@@ -613,19 +619,32 @@ def _build_setup(
 
     risk   = entry - stop
     reward = target - entry
-    rr     = round(reward / risk, 2) if risk > 0 else 0.0
+    rr_raw = round(reward / risk, 2) if risk > 0 else 0.0
 
     # ── Enforce R:R minimum 2.5 ───────────────────────────────────────────────
-    _MIN_RR = 2.5
+    _MIN_RR        = 2.5
+    target_adjusted = False
+
     if risk > 0:
         min_target = round(entry + _MIN_RR * risk, 2)
         if target < min_target:
-            target = min_target
-            reward = target - entry
-            rr     = round(reward / risk, 2)
+            target          = min_target
+            target_adjusted = True
+            reward          = target - entry
+
+    rr = round(reward / risk, 2) if risk > 0 else 0.0
 
     if rr < _MIN_RR:
-        return {**no_trade, "reasoning": f"R:R insuffisant ({rr:.2f}x < {_MIN_RR}x minimum)"}
+        rejection = f"R:R {rr:.2f} < 2.5 minimum"
+        return {
+            **no_trade,
+            "rr":               rr,
+            "rr_valid":         False,
+            "rr_rule":          "min_2.5",
+            "target_adjusted":  False,
+            "rejection_reason": rejection,
+            "reasoning":        f"R:R insuffisant ({rr:.2f}x < {_MIN_RR}x minimum)",
+        }
 
     parts = []
     if structure.get("bias") == "BULL":
@@ -636,17 +655,24 @@ def _build_setup(
         parts.append("prix en discount (<50 % du range)")
     if bull_obs_active:
         parts.append(f"Bull OB non mitigé @ ${bull_obs_active[-1]['high']:.2f}")
+    if target_adjusted:
+        parts.append(f"target ajusté pour R:R >= {_MIN_RR}")
     reasoning = " — ".join(parts) + f" ({confluences['count']}/6 confluences)"
 
     return {
-        "has_setup":    True,
-        "direction":    "LONG",
-        "entry":        entry,
-        "stop":         stop,
-        "target":       target,
-        "rr_ratio":     rr,
-        "invalidation": f"Clôture sous ${stop:.2f}",
-        "reasoning":    reasoning,
+        "has_setup":        True,
+        "direction":        "LONG",
+        "entry":            entry,
+        "stop":             stop,
+        "target":           target,
+        "rr_ratio":         rr,
+        "rr":               rr,
+        "rr_valid":         True,
+        "rr_rule":          "min_2.5",
+        "target_adjusted":  target_adjusted,
+        "rejection_reason": None,
+        "invalidation":     f"Clôture sous ${stop:.2f}",
+        "reasoning":        reasoning,
     }
 
 
@@ -719,6 +745,12 @@ def analyze_ticker(ticker: str, timeframes: list | None = None) -> dict:
         dp          = _discount_premium(structure["swing_highs"], structure["swing_lows"], current_price)
         confluences = _count_confluences(current_price, dp, obs, fvgs, df, structure)
         setup       = _build_setup(current_price, structure, obs, fvgs, liquidity, dp, confluences)
+
+        _rr = setup.get("rr")
+        if _rr is not None:
+            print(f"[SMC] {ticker} R:R brut={_rr:.2f} valid={setup.get('rr_valid')} adjusted={setup.get('target_adjusted')}")
+            if not setup.get("rr_valid"):
+                print(f"[SMC] {ticker} REJETE : R:R {_rr:.2f} < 2.5")
 
         return {
             "ticker":           ticker,
@@ -869,6 +901,18 @@ def format_smc_report(a: dict) -> str:
     lines.append(f"🤖 Mode : DÉMO (analyse algorithmique)")
 
     return "\n".join(lines)
+
+
+def analyze_ticker_smc(ticker: str) -> dict:
+    """Alias de analyze_ticker qui surface les champs R:R au niveau racine du dict."""
+    result = analyze_ticker(ticker)
+    setup  = result.get("setup") or {}
+    result["rr"]               = setup.get("rr")
+    result["rr_valid"]         = setup.get("rr_valid", False)
+    result["rr_rule"]          = setup.get("rr_rule", "min_2.5")
+    result["target_adjusted"]  = setup.get("target_adjusted", False)
+    result["rejection_reason"] = setup.get("rejection_reason")
+    return result
 
 
 # ── Test __main__ ─────────────────────────────────────────────────────────────

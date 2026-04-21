@@ -335,22 +335,28 @@ def unified_analysis(ticker: str) -> dict:
             pass
 
     # ── Enforce R:R minimum 2.5 ───────────────────────────────────────────────
-    _MIN_RR = 2.5
+    _MIN_RR        = 2.5
+    rr_valid       = True
+    rr_adjusted    = setup_smc.get("target_adjusted", False)
+
     if entry is not None and stop is not None:
         _risk = entry - stop
         if _risk > 0:
             _min_target = entry + _MIN_RR * _risk
             if target is None or target < _min_target:
-                target = round(_min_target, 2)
+                target     = round(_min_target, 2)
+                rr_adjusted = True
             _reward = target - entry
             rr = round(_reward / _risk, 2)
 
     if rr is not None and rr < _MIN_RR:
-        grade  = "NO TRADE"
-        entry  = None
-        stop   = None
-        target = None
-        rr     = None
+        rr_valid = False
+        grade    = "NO TRADE"
+        score    = min(score, 3.0)  # score plafonné à 3/10 si R:R invalide
+        entry    = None
+        stop     = None
+        target   = None
+        rr       = None
 
     # ── 6. Résumé smc_analysis allégé pour le dashboard ─────────────────────
     smc_summary = {
@@ -378,6 +384,9 @@ def unified_analysis(ticker: str) -> dict:
         "best_stop":              stop,
         "best_target":            target,
         "rr_ratio":               rr,
+        "rr_valid":               rr_valid,
+        "rr_adjusted":            rr_adjusted,
+        "rr_rule":                "min_2.5",
         "reasoning":              reasoning,
         "error":                  smc.get("error"),
         "options_data":           options_data,
