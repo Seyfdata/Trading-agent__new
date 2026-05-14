@@ -44,3 +44,10 @@ desktop.ini
 
 # Claude Code — config locale (contient des permissions spécifiques à la machine)
 .claude/settings.local.json
+
+# Claude Code — worktrees et skills générés automatiquement
+.claude/worktrees/
+.claude/skills/
+
+# Repo tiers (référence, pas du code projet)
+everything-claude-code/
