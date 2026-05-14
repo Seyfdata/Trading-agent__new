@@ -3,29 +3,25 @@
 # Installation : pip install -r requirements.txt
 # ============================================
 
-# --- Phase 2 : Morning Scan ---
-feedparser==6.0.11       # Lecture des flux RSS
-requests>=2.31.0         # Appels HTTP (Telegram, API)
-python-dotenv>=1.0.0     # Lire le fichier .env
-pyyaml>=6.0.1            # Lecture de config/config.yaml
+# Serveur & API
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
 
-# --- Phase 2+ : Claude API ---
-# Décommenter quand tu auras une clé API Anthropic :
-# anthropic>=0.39.0
+# Données marché
+yfinance>=0.2.40
 
-# --- Phase 3 : Scraping social ---
-# Décommenter quand Reddit sera configuré :
-# praw>=7.7.0            # Reddit API
-# beautifulsoup4>=4.12.0 # Scraping HTML
-# yfinance>=0.2.30       # Données de marché
+# Analyse & calculs
+pandas>=2.1.0
+numpy>=1.26.0
 
-# --- Phase 3 : Analyse ---
-# pandas>=2.1.0          # Manipulation de données
-# numpy>=1.26.0          # Calculs numériques
+# Config & utilitaires
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+requests>=2.31.0
 
-# --- Phase 3+ : Automatisation ---
-# schedule>=1.2.0        # Planification de tâches
+# Flux RSS
+feedparser==6.0.11
 
-# --- Phase 4 : Dashboard API ---
-fastapi>=0.111.0         # Framework API REST
-uvicorn[standard]>=0.29.0  # Serveur ASGI
+# --- Optionnel (décommenter si besoin) ---
+# anthropic>=0.39.0    # Claude API (~15€/mois)
+# praw>=7.7.0          # Reddit API officielle
