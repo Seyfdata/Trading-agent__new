@@ -1,4 +1,4 @@
-# Guide Utilisateur — SMC-AI Trading Agent v2
+﻿# Guide Utilisateur — SMC-AI Trading Agent v2
 
 > **Pour qui ?** Ce guide s'adresse à un utilisateur qui débute en trading. Aucune connaissance préalable n'est nécessaire pour suivre les étapes.
 
@@ -516,7 +516,7 @@ Le dashboard affiche le PnL en temps réel, la distance au stop et à la cible p
 
 Quand tu as vendu, clique sur "Clôturer" et entre le prix de sortie. Le PnL final est calculé automatiquement en dollars et en R:R réalisé.
 
-> ✅ **Objectif** : 50 trades journalisés pour avoir des statistiques représentatives de ton edge.
+> ✅ **Objectif** : utilise le journal dès le premier trade. Plus tu enregistres, plus les métriques de performance sont précises.
 
 ---
 

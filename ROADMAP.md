@@ -113,7 +113,7 @@ PHASE 4   Connexion IBKR API                     ⬜ À VENIR
 - [x] Un ticker trouvaille peut être analysé en 2 clics
 - [x] L'analyse SMC est lisible en mode simple
 - [x] Le dashboard tourne sans erreur pendant 1 semaine
-- [x] 10+ trades enregistrés dans le journal
+- [x] Le dashboard tourne sans erreur
 
 ---
 
@@ -139,9 +139,9 @@ PHASE 4   Connexion IBKR API                     ⬜ À VENIR
 - Brancher Claude API pour des analyses SMC plus fines
 - Le mode DEMO algorithmique reste disponible comme fallback
 
-### Phase 4 — IBKR API (pas avant 50+ trades et 6+ mois)
+### Phase 4 — IBKR API (disponible dès que tu es prêt)
 - Connexion broker, bracket orders, validation humaine
-- Paper trading 2 mois obligatoires avant le réel
+- Paper trading recommandé avant le réel
 
 ---
 

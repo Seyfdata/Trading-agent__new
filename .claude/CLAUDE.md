@@ -1,4 +1,4 @@
-# CLAUDE.md
+﻿# CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -182,9 +182,9 @@ DELETE /api/watchlist/temp/{t} → retirer ticker temporaire
 | Phase 1 — Morning Brief PRO | ✅ |
 | Phase 2 — Scoring + Dashboard | ✅ |
 | Phase 3 — SMC, options, backtest, Coach, Pullback Scanner, RS Scout | ✅ 100% |
-| Phase 4 — Connexion IBKR API | ⬜ (prérequis : 50+ trades, 6+ mois) |
+| Phase 4 — Connexion IBKR API | ⬜ À venir |
 
-**Priorités actuelles** : accumuler 50 trades dans le journal, connecter les onglets entre eux (Reddit → Setups → Analyse).
+**Priorités actuelles** : utiliser le journal de trades dès maintenant, exploiter tous les onglets (Propositions → Analyse → Journal).
 
 ---
 

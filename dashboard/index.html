@@ -703,7 +703,7 @@ function OverviewTab(props) {
   var setupsData       = props.setupsData;
   var onGoToSetups     = props.onGoToSetups     || function() {};
   var posMonitor       = props.posMonitor        || { positions: [], count: 0 };
-  var tradesProgress   = props.tradesProgress    || { total_closed: 0, target: 50, progress_pct: 0, next_milestone: 10, milestone_message: '' };
+  var tradesProgress   = props.tradesProgress    || { total_closed: 0 };
   var scanResults      = props.scanResults       || [];
   var onGoToSmc        = props.onGoToSmc         || function() {};
   var onGoToReddit     = props.onGoToReddit      || function() {};
@@ -847,41 +847,6 @@ function OverviewTab(props) {
           })}
         </div>
       )}
-
-      {/* ── Compteur 50 trades ── */}
-      {(function() {
-        var tc  = tradesProgress.total_closed;
-        var pct = tradesProgress.progress_pct;
-        var barColor = tc >= 50 ? '#10b981' : tc >= 20 ? '#3b82f6' : tc >= 10 ? '#f59e0b' : '#ef4444';
-        var STEPS = [
-          { n: 10, label: 'Sharpe' },
-          { n: 20, label: 'Monte Carlo' },
-          { n: 50, label: 'Stats fiables' },
-        ];
-        return (
-          <div className="card mb16" style={{ padding: '10px 16px' }}>
-            <div className="rowb mb6">
-              <span className="stitle" style={{ marginBottom: 0 }}>🎯 PROGRESSION</span>
-              <span style={{ fontSize: 11, color: 'var(--muted)' }}>{tc}/{tradesProgress.target} trades clôturés</span>
-            </div>
-            <div style={{ background: 'rgba(30,41,59,.6)', borderRadius: 4, height: 6, marginBottom: 8, overflow: 'hidden' }}>
-              <div style={{ width: pct + '%', height: '100%', background: barColor, borderRadius: 4, transition: 'width .4s ease' }} />
-            </div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{tradesProgress.milestone_message}</div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              {STEPS.map(function(s) {
-                var done = tc >= s.n;
-                return (
-                  <div key={s.n} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: done ? '#10b981' : 'var(--muted)' }}>
-                    <span>{done ? '✅' : '🔲'}</span>
-                    <span>{s.n} ({s.label})</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      })()}
 
       {discItems.length > 0 && (
         <div className="card mb16" style={{ padding: '10px 16px' }}>
@@ -1820,24 +1785,6 @@ function PerformanceTab(props) {
   var ddColor  = '#ef4444';
   var exColor  = isEmpty ? 'var(--muted)' : (perf.expectancy >= 0 ? '#10b981' : '#ef4444');
 
-  var _tc  = perf.total_trades || 0;
-  var _pct = Math.min(Math.round(_tc / 50 * 100), 100);
-  var _barC = _tc >= 50 ? '#10b981' : _tc >= 20 ? '#3b82f6' : _tc >= 10 ? '#f59e0b' : '#ef4444';
-
-  return (
-    <div>
-      {/* ── Bannière progression 50 trades ── */}
-      <div className="card mb16" style={{ padding: '10px 16px', borderLeft: '3px solid ' + (_tc >= 50 ? '#10b981' : '#f59e0b') }}>
-        <div className="rowb mb6">
-          <span style={{ fontSize: 12, fontWeight: 700, color: _tc >= 50 ? '#10b981' : '#f59e0b' }}>
-            {_tc >= 50 ? '✅ 50+ trades — métriques fiables' : '⚠️ ' + _tc + '/50 trades — les métriques ne sont pas encore significatives'}
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--muted)' }}>{_pct}%</span>
-        </div>
-        <div style={{ background: 'rgba(30,41,59,.6)', borderRadius: 4, height: 5, overflow: 'hidden' }}>
-          <div style={{ width: _pct + '%', height: '100%', background: _barC, borderRadius: 4, transition: 'width .4s ease' }} />
-        </div>
-      </div>
 
       {isEmpty && (
         <div className="card mb16" style={{ textAlign: 'center', padding: '32px 24px' }}>
@@ -4509,7 +4456,6 @@ function GuideTab() {
         <div style={sCode}>{`Ticker + Setup type + Direction + Entry/Stop/Target\n→ R:R calculé en temps réel (rouge si < 2.5R)\n→ Shares calculées automatiquement (1% risque)`}</div>
         <p style={sText}><strong>Positions ouvertes</strong> : suivi live avec PnL en temps réel, distance au stop et au target, alertes visuelles.</p>
         <p style={sText}><strong>Clôture</strong> : entre le prix de sortie → PnL calculé automatiquement en $ et en R:R réalisé.</p>
-        <div style={sOk}>✅ Objectif : 50 trades journalisés pour avoir des statistiques représentatives</div>
         <div style={sWarn}>⚠️ Piège : ne jamais saisir un trade avec R:R {'<'} 2.5. Si le journal affiche rouge, repousse le target ou annule le trade.</div>
       </Sec>
 
@@ -4616,7 +4562,7 @@ function CoachTab(props) {
   var refreshLoading  = props.refreshLoading  || false;
   var lastUpd         = props.lastUpd;
   var onGoToJournal   = props.onGoToJournal   || function(){};
-  var tradesProgress  = props.tradesProgress  || { total_closed: 0, target: 50, progress_pct: 0, next_milestone: 10, milestone_message: '' };
+  var tradesProgress  = props.tradesProgress  || { total_closed: 0 };
 
   var CAPITAL  = 10000;
   var RISK_PCT = 1.0;
@@ -5253,54 +5199,6 @@ function CoachTab(props) {
     </div>
   ) : null;
 
-  // ── Amélioration 6 : Progression vers 50 trades ──────────────────────────
-  var progressSection = (function() {
-    var tc    = tradesProgress.total_closed || 0;
-    var pct   = Math.min(100, tradesProgress.progress_pct || 0);
-    var msg   = tradesProgress.milestone_message || '';
-    var barClr = tc < 10 ? '#ef4444' : tc < 20 ? '#f59e0b' : tc < 50 ? '#3b82f6' : '#10b981';
-    var milestones = [
-      { n: 10, label: '10 trades', desc: 'Sharpe/Sortino', done: tc >= 10 },
-      { n: 20, label: '20 trades', desc: 'Monte Carlo',    done: tc >= 20 },
-      { n: 50, label: '50 trades', desc: 'Stats fiables',  done: tc >= 50 },
-    ];
-    var QUOTES = [
-      '"Chaque trade enregistré, gagné ou perdu, te rapproche d\'une meilleure compréhension de ton edge."',
-      '"La discipline fait la différence entre un trader et un joueur."',
-      '"Les statistiques ne mentent pas. Tes 50 trades te diront la vérité."',
-    ];
-    var quote = QUOTES[tc % QUOTES.length];
-    return (
-      <div style={{ background: '#111827', border: '1px solid #1e293b', borderRadius: 10, padding: '18px 22px', marginBottom: 20 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 14 }}>🎯 TA PROGRESSION</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 22, fontWeight: 700, color: barClr }}>{tc}</span>
-          <span style={{ fontSize: 14, color: '#64748b' }}>/ 50 trades clôturés</span>
-        </div>
-        <div style={{ background: '#1e293b', borderRadius: 6, height: 10, marginBottom: 8, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: pct + '%', background: barClr, borderRadius: 6, transition: 'width .4s' }} />
-          {/* Milestone markers */}
-          {[10, 20, 50].map(function(m) {
-            return <div key={m} style={{ position: 'absolute', left: (m / 50 * 100) + '%', top: 0, bottom: 0, width: 2, background: '#0a0e17', opacity: 0.6 }} />;
-          })}
-        </div>
-        <div style={{ fontSize: 12, color: barClr, marginBottom: 12 }}>{msg || (tc >= 50 ? '🎯 50+ trades atteints ! Tes métriques sont significatives' : '')}</div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
-          {milestones.map(function(m) {
-            return (
-              <div key={m.n} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-                <span style={{ color: m.done ? '#10b981' : '#334155', fontSize: 14 }}>{m.done ? '✅' : '🔲'}</span>
-                <span style={{ color: m.done ? '#10b981' : '#475569' }}>{m.label} <span style={{ color: '#334155' }}>({m.desc})</span></span>
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ fontSize: 12, color: '#475569', fontStyle: 'italic', lineHeight: 1.6 }}>{quote}</div>
-      </div>
-    );
-  })();
-
-  // ── Section 4 : Règles d'or ───────────────────────────────────────────────
   var RULES = [
     { n: 1, icon: '🛑', rule: 'STOP LOSS = SACRÉ',          detail: 'Ne le déplace JAMAIS vers le bas' },
     { n: 2, icon: '💰', rule: 'RISQUE MAX 1%',               detail: 'Si tu perds, c\'est $100 max sur $10,000 de capital' },
@@ -5342,7 +5240,6 @@ function CoachTab(props) {
       {stepNav}
       {stepContent}
       {posSection}
-      {progressSection}
       {rulesSection}
       {pineModal && <PineConfigModal setup={pineModal} shares={pineModal ? (computeSizing(pineModal) || {}).shares : null} onClose={function() { setPineModal(null); }} />}
     </div>
@@ -5496,7 +5393,7 @@ function TradingDashboard() {
   var smcForceTicker      = smcForceTickerState[0];
   var setSmcForceTicker   = smcForceTickerState[1];
 
-  var tpState        = useState({ total_closed: 0, target: 50, progress_pct: 0, next_milestone: 10, milestone_message: '📊 Encore 10 trades pour débloquer Sharpe/Sortino' });
+  var tpState        = useState({ total_closed: 0 });
   var tradesProgress = tpState[0];
   var setTradesProgress = tpState[1];
 
@@ -5528,8 +5425,6 @@ function TradingDashboard() {
           total_closed:      d.total_closed,
           target:            d.target            || 50,
           progress_pct:      d.progress_pct      || 0,
-          next_milestone:    d.next_milestone,
-          milestone_message: d.milestone_message || '',
         });
       })
       .catch(function() {});

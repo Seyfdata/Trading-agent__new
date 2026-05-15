@@ -1,4 +1,4 @@
-"""
+﻿"""
 Dashboard API — FastAPI server pour le trading agent.
 
 Lance avec :
@@ -1585,7 +1585,7 @@ async def create_trade(request: Request):
 def list_trades(status: str = None, limit: int = 100):
     """Liste tous les trades triés par date décroissante.
     Params optionnels : status (OPEN/CLOSED_WIN/CLOSED_LOSS/CLOSED_BE), limit.
-    Inclut toujours les champs de progression vers 50 trades.
+    Params optionnels : status (OPEN/CLOSED_WIN/CLOSED_LOSS/CLOSED_BE), limit.
     """
     try:
         trades = get_all_trades(limit=limit, status=status)
@@ -1603,30 +1603,11 @@ def list_trades(status: str = None, limit: int = 100):
         except Exception:
             pass
 
-        _TARGET = 50
-        progress_pct = min(round(total_closed / _TARGET * 100, 1), 100.0)
-
-        if total_closed >= _TARGET:
-            next_milestone    = "✅ Atteint"
-            milestone_message = "🎯 50+ trades atteints ! Tes métriques sont significatives"
-        elif total_closed >= 20:
-            next_milestone    = 50
-            milestone_message = f"🏆 Encore {_TARGET - total_closed} trades pour des statistiques fiables"
-        elif total_closed >= 10:
-            next_milestone    = 20
-            milestone_message = f"🎲 Encore {20 - total_closed} trades pour débloquer Monte Carlo"
-        else:
-            next_milestone    = 10
-            milestone_message = f"📊 Encore {10 - total_closed} trades pour débloquer Sharpe/Sortino"
 
         return clean_for_json({
             "count":             len(trades),
             "trades":            trades,
             "total_closed":      total_closed,
-            "target":            _TARGET,
-            "progress_pct":      progress_pct,
-            "next_milestone":    next_milestone,
-            "milestone_message": milestone_message,
         })
     except Exception as e:
         return {"error": str(e), "trades": []}
