@@ -188,11 +188,86 @@ DELETE /api/watchlist/temp/{t} → retirer ticker temporaire
 
 ---
 
+## Outils Claude Code installés
+
+### Plugins actifs
+
+| Plugin | Rôle |
+|--------|------|
+| **ECC** (Everything Claude Code) | Skills, agents, hooks, rules — écosystème complet |
+| **claude-mem** | Mémoire sémantique persistante inter-sessions |
+
+### MCP servers disponibles
+
+| MCP | Commande | Usage typique pour ce projet |
+|-----|----------|------------------------------|
+| `ecc:exa` | `mcp__plugin_ecc_exa__web_search_exa` | Recherche stratégies trading, docs yfinance, news marché |
+| `ecc:context7` | `mcp__plugin_ecc_context7__query-docs` | Docs FastAPI, pandas, React, yfinance |
+| `ecc:github` | `mcp__plugin_ecc_github__*` | Gestion PRs, issues, push de code |
+| `ecc:playwright` | `mcp__plugin_ecc_playwright__*` | Tests UI du dashboard dans le navigateur |
+| `ecc:memory` | `mcp__plugin_ecc_memory__*` | Graphe de connaissances projet |
+| `ecc:sequential-thinking` | `mcp__plugin_ecc_sequential-thinking__*` | Raisonnement structuré sur des problèmes complexes |
+| `claude-mem` | `mcp__plugin_claude-mem_mcp-search__*` | Retrouver décisions et patterns des sessions passées |
+| `claude_ai:Gmail` | `mcp__claude_ai_Gmail__*` | Notifications, alertes par email |
+| `claude_ai:Google_Drive` | `mcp__claude_ai_Google_Drive__*` | Export/import de données |
+
+### Skills ECC utiles pour ce projet
+
+Invoquer avec `/ecc:<skill>` ou `/nom-court` :
+
+| Skill | Commande | Quand l'utiliser |
+|-------|----------|-----------------|
+| `deep-research` | `/ecc:deep-research` | Rechercher nouvelles stratégies SMC, docs techniques |
+| `market-research` | `/ecc:market-research` | Analyser concurrents, tendances outils trading |
+| `security-review` | `/ecc:security-review` | Auditer api.py avant déploiement |
+| `python-review` | `/ecc:python-review` | Review modules analysis/, scrapers/ |
+| `e2e-testing` | `/ecc:e2e` | Tests Playwright du dashboard (killzone, journal) |
+| `tdd-workflow` | `/ecc:tdd` | TDD pour nouveaux modules d'analyse |
+| `verification-loop` | `/ecc:verify` | Validation complète avant release |
+| `blueprint` | `/ecc:blueprint` | Planifier une fonctionnalité multi-sessions |
+| `plan` | `/ecc:plan` | Planifier une feature dans la session courante |
+| `mem-search` | `/claude-mem:mem-search` | Retrouver contexte des sessions précédentes |
+
+### Hooks actifs (automatiques, ne pas contourner)
+
+| Hook | Déclencheur | Effet |
+|------|-------------|-------|
+| `block-no-verify` | `git commit --no-verify` | Bloqué — ne jamais bypasser |
+| `quality-gate` | Après Edit/Write | Vérifie qualité du code modifié |
+| `governance-capture` | Bash/Edit/Write | Capture les décisions d'architecture |
+| `continuous-learning-v2` | Toutes actions | Apprend les patterns pour sessions futures |
+| `cost-tracker` | Fin de session | Suit le coût API |
+| `config-protection` | Edit/Write | Protège les fichiers de config sensibles |
+| `pre-bash-commit-quality` | Avant commit | Vérifie format et qualité du message |
+
+### Workflow Claude Code pour ce projet
+
+```bash
+# Recherche rapide dans la mémoire des sessions passées
+/claude-mem:mem-search "pullback scanner"
+
+# Planifier une nouvelle fonctionnalité
+/ecc:plan
+
+# Review du code Python après modification
+/ecc:python-review
+
+# Test E2E du dashboard
+/ecc:e2e
+
+# Rechercher une stratégie trading ou doc technique
+/ecc:deep-research "SMC order block detection algorithm"
+
+# Vérification complète avant commit
+/ecc:verify
+```
+
+---
+
 ## Fichiers de référence
 
-- `COMMANDS.md` — référence des commandes Claude Code pour ce projet
-- `METHODOLOGIE_TRAVAIL.md` — méthodologie de développement
+- `GUIDE_UTILISATEUR.md` — guide complet pour l'utilisateur final (débutant)
 - `ROADMAP.md` — roadmap consolidée
-- `.claude/GUIDE_CLAUDE_CODE.md` — guide Claude Code avancé
-- `skills/trading-coach.skill` — skill Claude Code pour le coaching trading
-- `skills/webapp-testing.skill` — skill Claude Code pour les tests
+- `skills/trading-coach.skill` — skill pour le coaching trading
+- `skills/webapp-testing.skill` — skill pour les tests webapp
+- `everything-claude-code/` — repo ECC local (ne pas modifier)

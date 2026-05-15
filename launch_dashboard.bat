@@ -6,16 +6,16 @@ echo =================================================
 echo.
 echo Lancement SMC-AI Dashboard...
 
-REM Activer le venv (ajuster "venv" si le dossier s'appelle "env")
-if exist venv\Scripts\activate (
+REM Activer le venv (.venv en priorite, puis venv, puis env)
+if exist .venv\Scripts\activate (
+    call .venv\Scripts\activate
+) else if exist venv\Scripts\activate (
     call venv\Scripts\activate
 ) else if exist env\Scripts\activate (
     call env\Scripts\activate
 ) else (
     echo  [WARN] Aucun venv trouve -- utilisation du Python systeme
 )
-
-pip install fastapi "uvicorn[standard]" --quiet
 python launch_dashboard.py
 
 pause

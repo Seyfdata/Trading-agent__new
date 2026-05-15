@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
@@ -715,10 +715,65 @@ function OverviewTab(props) {
     data.reddit.data.filter(function(r) { return !r.in_watchlist && r.mentions >= 3 && r.verified; })
     .sort(function(a, b) { return b.mentions - a.mentions; }).slice(0, 5) : [];
   var newsItems = data.news ? [].concat(data.news.ticker_news || [], data.news.market_news || []).slice(0, 5) : [];
+  var onGoToProposals = props.onGoToProposals || function() {};
+
+  var qpState = useState({ data: null, loading: false, error: null });
+  var qp = qpState[0]; var setQp = qpState[1];
+
+  useEffect(function() {
+    setQp(function(prev) { return Object.assign({}, prev, { loading: true, error: null }); });
+    fetch('/api/proposals?capital=10000')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var top = d.proposals && d.proposals.length > 0 ? d.proposals[0] : null;
+        setQp({ data: top, loading: false, error: null });
+      })
+      .catch(function() { setQp({ data: null, loading: false, error: true }); });
+  }, []);
+
+  var qpTop     = qp.data;
+  var qpLoading = qp.loading;
+  var qpError   = qp.error;
 
   return (
     <div>
-      <div className="stitle">INDICATEURS MARCHÉ</div>
+      {qpLoading && (
+        <div className="card mb16" style={{ padding: '14px 18px', borderLeft: '4px solid var(--accent)' }}>
+          <div className="row g8">
+            <span className="spin-anim">⟳</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>Calcul de la proposition du jour...</span>
+          </div>
+        </div>
+      )}
+      {!qpLoading && qpError && (
+        <div className="card mb16" style={{ padding: '12px 16px', borderLeft: '4px solid var(--border)' }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>Lance une analyse pour voir la meilleure opportunite du jour</div>
+          <button className="btn btn-p" style={{ fontSize: 11 }} onClick={onGoToProposals}>Propositions</button>
+        </div>
+      )}
+      {!qpLoading && qpTop && (
+        <div className="card mb16" style={{ borderLeft: '4px solid var(--accent)', padding: '16px 20px' }}>
+          <div className="rowb" style={{ marginBottom: 10 }}>
+            <div className="row g8">
+              <span style={{ fontWeight: 700, fontSize: 13 }}>PROPOSITION DU JOUR</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: _gradeColor(qpTop.grade), background: _gradeColor(qpTop.grade) + '18', padding: '2px 8px', borderRadius: 4 }}>{qpTop.grade}</span>
+            </div>
+            <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={onGoToProposals}>Voir toutes</button>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px', fontSize: 13, marginBottom: 8 }}>
+            <div><div className="mc" style={{ fontSize: 10 }}>Ticker</div><div style={{ fontWeight: 700, fontSize: 22, color: 'var(--accent)' }}>{qpTop.ticker}</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>R:R</div><div style={{ fontWeight: 700, fontSize: 20, color: 'var(--bull)' }}>{qpTop.rr_ratio}x</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>Entree</div><div style={{ fontWeight: 600 }}>${qpTop.entry}</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>Stop loss</div><div style={{ fontWeight: 600, color: 'var(--bear)' }}>${qpTop.stop}</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>Cible TP2</div><div style={{ fontWeight: 600, color: 'var(--bull)' }}>${qpTop.tp2}</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>Quantite</div><div style={{ fontWeight: 600 }}>{qpTop.shares} actions</div></div>
+          </div>
+          {qpTop.reason && (
+            <div className="mc" style={{ fontSize: 11, paddingTop: 8, borderTop: '1px solid var(--border)' }}>{qpTop.reason}</div>
+          )}
+        </div>
+      )}
+      <div className="stitle">INDICATEURS MARCHE</div>
       <div className="g5 mb16">
         <InstrumentCard name="S&amp;P 500"    data={inst.spy}   />
         <InstrumentCard name="NASDAQ 100"     data={inst.qqq}   />
@@ -5794,7 +5849,7 @@ function TradingDashboard() {
       </nav>
 
       <main className="content">
-        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} tradesProgress={tradesProgress} />}
+        {tab === 'overview'  && <OverviewTab  data={data} postmarketData={pmData} pmLoading={pmLoading} onLoadPostmarket={loadPostmarket} setupsData={setupsData} onGoToSetups={function() { setTab('setups'); }} posMonitor={posMonitor} scanResults={scanResults} onGoToSmc={function() { setTab('smc'); }} onGoToReddit={function() { setTab('reddit'); }} onGoToProposals={function() { setTab('proposals'); }} tradesProgress={tradesProgress} />}
         {tab === 'coach'     && <CoachTab data={data} posMonitor={posMonitor} scanResults={scanResults} scanLoading={scanLoading} onScan={loadScanUnified} onRefresh={handleRefresh} refreshLoading={loading} lastUpd={lastUpd} onGoToJournal={handleAddTradeFromSmc} tradesProgress={tradesProgress} />}
         {tab === 'proposals' && <PropositionsTab onGoToSmc={function(ticker) { setSmcForceTicker(ticker); setTab('smc'); }} onGoToJournal={handleAddTradeFromSmc} />}
         {tab === 'watchlist' && <WatchlistTab data={data} onGoToSmc={function(ticker) { setSmcForceTicker(ticker); setTab('smc'); }} />}

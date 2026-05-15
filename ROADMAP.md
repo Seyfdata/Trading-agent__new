@@ -1,7 +1,7 @@
-# 🗺️ ROADMAP — Trading Agent SMC-AI
+﻿# 🗺️ ROADMAP — Trading Agent SMC-AI
 
 > **Dernière mise à jour** : 21 mars 2026  
-> **Statut global** : Phases 1-2 ✅ — Phase 3 à 95% — Phase de CONSOLIDATION en cours
+> **Statut global** : Phases 1-3 ✅ — CONSO ✅ — Nouvelles features en cours
 
 ---
 
@@ -11,9 +11,9 @@
 PHASE 1   Morning Brief PRO                    ✅ TERMINÉE
 PHASE 2A  Scoring + Dashboard React             ✅ TERMINÉE
 PHASE 2B  Workflow complet (setups→journal→perf) ✅ TERMINÉE
-PHASE 3   Agent analyse SMC (mode DEMO)          🔄 95%
+PHASE 3   Agent analyse SMC (mode DEMO)          ✅ 100%
 ──────────────────────────────────────────────────────────
-CONSO     Consolidation & fiabilisation          ← ON EST ICI
+CONSO     Consolidation & fiabilisation          ✅ TERMINÉE
 ──────────────────────────────────────────────────────────
 PHASE 4   Connexion IBKR API                     ⬜ À VENIR
 ```
@@ -109,11 +109,27 @@ PHASE 4   Connexion IBKR API                     ⬜ À VENIR
 | Push final | Version stable, documentée |
 
 ### Critères de fin de consolidation
-- [ ] Reddit montre des données fraîches à chaque refresh
-- [ ] Un ticker trouvaille peut être analysé en 2 clics
-- [ ] L'analyse SMC est lisible en mode simple
-- [ ] Le dashboard tourne sans erreur pendant 1 semaine
-- [ ] 10+ trades enregistrés dans le journal
+- [x] Reddit montre des données fraîches à chaque refresh
+- [x] Un ticker trouvaille peut être analysé en 2 clics
+- [x] L'analyse SMC est lisible en mode simple
+- [x] Le dashboard tourne sans erreur pendant 1 semaine
+- [x] 10+ trades enregistrés dans le journal
+
+---
+
+
+## SPRINT NOUVELLES FEATURES — Mai 2026
+
+### Feature NF-1 : Proposition du Jour (OverviewTab) ✅
+| Tâche | Statut |
+|-------|--------|
+| Endpoint /api/proposals avec scoring unifié | ✅ |
+| Carte "Proposition du Jour" en haut de la Vue d'ensemble | ✅ |
+| Navigation directe vers onglet Propositions | ✅ |
+| Position sizing automatique (capital 10 000 $) | ✅ |
+
+### Feature NF-2 : Prochaine feature
+- À définir selon priorités
 
 ---
 
