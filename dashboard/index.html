@@ -1785,6 +1785,8 @@ function PerformanceTab(props) {
   var ddColor  = '#ef4444';
   var exColor  = isEmpty ? 'var(--muted)' : (perf.expectancy >= 0 ? '#10b981' : '#ef4444');
 
+  return (
+    <div>
 
       {isEmpty && (
         <div className="card mb16" style={{ textAlign: 'center', padding: '32px 24px' }}>
