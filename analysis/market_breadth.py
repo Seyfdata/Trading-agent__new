@@ -1,4 +1,4 @@
-"""
+﻿"""
 Market Breadth — Ampleur du marché (50 top constituents S&P 500).
 
 Calcule advancers/decliners, A/D ratio, top gainers/losers.
@@ -29,23 +29,10 @@ _SP50 = [
     "KO", "PEP", "ACN", "TMO", "ADBE", "IBM", "LIN", "MCD", "CSCO", "TXN",
     "ABT", "GE", "QCOM", "INTU", "AMGN", "NEE", "INTC", "RTX", "SPGI", "CAT",
 ]
-_CACHE_TTL = 300
-_breadth_cache: dict = {"data": None, "expires": 0.0}
 
 
-def clean_for_json(obj):
-    if isinstance(obj, dict):
-        return {k: clean_for_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [clean_for_json(i) for i in obj]
-    if obj is None or isinstance(obj, (str, bool)):
-        return obj
-    try:
-        import math
-        f = float(obj)
-        return None if (math.isnan(f) or math.isinf(f)) else round(f, 4)
-    except Exception:
-        return str(obj)
+from analysis.technical_indicators import clean_for_json
+from core.cache import cache_get, cache_set
 
 
 def get_market_breadth() -> dict:
@@ -53,10 +40,10 @@ def get_market_breadth() -> dict:
     Télécharge les variations du jour pour les 50 top S&P 500.
     Cache 5 min. Retour dégradé si erreur réseau.
     """
-    now = time.time()
-    if _breadth_cache["data"] is not None and now < _breadth_cache["expires"]:
-        print(f"[MarketBreadth] Cache valide ({int(_breadth_cache['expires'] - now)}s restantes)")
-        return _breadth_cache["data"]
+    cached = cache_get("market_breadth")
+    if cached is not None:
+        print("[MarketBreadth] Cache valide")
+        return cached
 
     fallback = {
         "advancers": 0, "decliners": 0, "ad_ratio": 1.0,
@@ -134,8 +121,7 @@ def get_market_breadth() -> dict:
         }
         result = clean_for_json(result)
         print(f"[MarketBreadth] {advancers} adv / {decliners} dec -> A/D={ad_ratio} ({strength})")
-        _breadth_cache["data"]    = result
-        _breadth_cache["expires"] = now + _CACHE_TTL
+        cache_set("market_breadth", result, 300)
         return result
 
     except Exception as e:

@@ -33,7 +33,6 @@ Endpoints :
 """
 
 import json
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -43,32 +42,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
-try:
-    import numpy as np
-    _NUMPY = True
-except ImportError:
-    np = None
-    _NUMPY = False
-
-
-def clean_for_json(obj):
-    """Convertit les types numpy en types Python natifs pour la sérialisation JSON."""
-    if isinstance(obj, dict):
-        return {k: clean_for_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [clean_for_json(item) for item in obj]
-    if _NUMPY:
-        if isinstance(obj, np.bool_):
-            return bool(obj)
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-    return str(obj)
+from core.cache import cache_get
+from analysis.technical_indicators import clean_for_json
 
 DASHBOARD_HTML = Path(__file__).parent / "index.html"
 REDDIT_SCANNER = Path(__file__).parent.parent / "RedditScanner" / "main.py"
@@ -81,7 +56,7 @@ from scrapers.rss_news import fetch_and_filter
 from scrapers.macro_calendar import (
     detect_recurring_events, check_earnings_today, get_trading_recommendation,
 )
-from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv, is_known_ticker, scan_reddit_direct, _DIRECT_CACHE as _REDDIT_CACHE
+from scrapers.reddit import find_scanner_dir, read_watchlist as read_reddit_csv, is_known_ticker, scan_reddit_direct
 from analysis.scoring import score_ticker, score_market_context, rank_tickers
 from analysis.reddit_trend import get_reddit_trends, save_today_snapshot, verify_ticker
 from database.models import (
@@ -356,7 +331,7 @@ def get_reddit():
     try:
         # ── Source principale : scan direct Reddit ────────────────────────────
         wl_rows, disc_rows = scan_reddit_direct(cache_ttl=1800)
-        meta = (_REDDIT_CACHE.get("data") or {})
+        meta = cache_get("reddit_direct") or {}
 
         # ── Fusion buzztickr : ajouter les mentions watchlist depuis buzztickr ─
         from scrapers.reddit import scan_buzztickers, TICKER_BLACKLIST as _BL

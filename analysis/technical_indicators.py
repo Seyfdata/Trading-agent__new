@@ -1,4 +1,4 @@
-"""
+﻿"""
 Technical Indicators — Calculs RSI, Bollinger, Stochastique, ADX, MACD, MAs.
 
 Fonctions pures recevant un DataFrame yfinance.
@@ -11,6 +11,8 @@ import time
 from functools import wraps
 from datetime import datetime
 from typing import Optional
+
+from core.cache import cache_get, cache_set
 
 try:
     import pandas as pd
@@ -29,25 +31,6 @@ try:
     _YF_OK = True
 except ImportError:
     _YF_OK = False
-
-
-# ── Cache maison TTL (évite lru_cache qui n'expire pas) ──────────────────────
-_CACHE: dict = {}
-_CACHE_TTL = 300  # 5 minutes
-
-_SHORT_CACHE: dict = {}
-_SHORT_TTL = 86400  # 24 heures
-
-
-def _cache_get(key: str) -> Optional[dict]:
-    entry = _CACHE.get(key)
-    if entry and time.time() < entry["expires"]:
-        return entry["data"]
-    return None
-
-
-def _cache_set(key: str, data: dict, ttl: int = _CACHE_TTL):
-    _CACHE[key] = {"data": data, "expires": time.time() + ttl}
 
 
 def _nan_to_none(v):
@@ -272,9 +255,9 @@ def get_short_interest(ticker: str) -> dict:
     """Récupère le short interest via yfinance.info — cache 24h."""
     result = {"short_pct": None, "days_to_cover": None, "short_ratio": None}
     cache_key = f"short_{ticker}"
-    cached = _SHORT_CACHE.get(cache_key)
-    if cached and time.time() < cached["expires"]:
-        return cached["data"]
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
     if not _YF_OK:
         return result
     try:
@@ -295,7 +278,7 @@ def get_short_interest(ticker: str) -> dict:
         }
     except Exception as e:
         print(f"[TechIndicators] get_short_interest({ticker}) error: {e}")
-    _SHORT_CACHE[cache_key] = {"data": result, "expires": time.time() + _SHORT_TTL}
+    cache_set(cache_key, result, 86400)
     return result
 
 
@@ -305,7 +288,7 @@ def analyze_ticker(ticker: str) -> dict:
     Cache interne 5 min.
     """
     ticker = ticker.upper()
-    cached = _cache_get(ticker)
+    cached = cache_get(ticker)
     if cached is not None:
         print(f"[TechIndicators] {ticker}: depuis cache")
         return cached
@@ -359,7 +342,7 @@ def analyze_ticker(ticker: str) -> dict:
             "analyzed_at": datetime.now().isoformat(),
         }
         result = clean_for_json(result)
-        _cache_set(ticker, result)
+        cache_set(ticker, result, 300)
         print(f"[TechIndicators] {ticker}: RSI={rsi} BB%B={bollinger.get('percent_b')} Stoch={stochastic.get('k')} cond={conditions_met}/3")
         return result
 

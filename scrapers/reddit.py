@@ -1,20 +1,19 @@
-"""
-Module Reddit — Wrapper pour le RedditScanner PRO v4.
+﻿"""
+Module Reddit â€” Wrapper pour le RedditScanner PRO v4.
 
 Ce module lance ton scanner existant (RedditScanner/main.py),
-lit les CSV/JSON qu'il produit, et formate les résultats
+lit les CSV/JSON qu'il produit, et formate les rÃ©sultats
 pour le morning scan.
 
 PAS BESOIN de l'API Reddit ni de PRAW.
 Ton scanner utilise le JSON public de Reddit.
 
-Prérequis :
+PrÃ©requis :
   pip install pandas requests beautifulsoup4
-  Le dossier RedditScanner/ doit être dans trading-agent/
+  Le dossier RedditScanner/ doit Ãªtre dans trading-agent/
 """
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -25,17 +24,18 @@ except ImportError:
     PANDAS_AVAILABLE = False
 
 from config.settings import WATCHLIST, EMOJI_FIRE, EMOJI_BULL, EMOJI_BEAR, EMOJI_NEUTRAL
+from core.cache import cache_get, cache_set
 
 
-# ── Liste de référence — S&P 500 + Nasdaq 100 + watchlist perso ──────────────
-# Tout ticker ABSENT de cette liste sera marqué "non vérifié" dans le dashboard.
+# â”€â”€ Liste de rÃ©fÃ©rence â€” S&P 500 + Nasdaq 100 + watchlist perso â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Tout ticker ABSENT de cette liste sera marquÃ© "non vÃ©rifiÃ©" dans le dashboard.
 # Source : top capitalisations S&P 500 + Nasdaq 100 + 22 tickers perso.
 VALID_TICKERS = {
-    # ── Notre watchlist (22) ─────────────────────────────────────────────────
+    # â”€â”€ Notre watchlist (22) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "AAPL", "NVDA", "TSLA", "MSFT", "META", "AMZN", "GOOGL", "AMD",
     "AVGO", "QCOM", "INTC", "MU", "ASML", "TSM", "MRVL", "PLTR",
     "SMCI", "CRM", "SNOW", "TWLO", "ZS", "BABA",
-    # ── S&P 500 top 60 ───────────────────────────────────────────────────────
+    # â”€â”€ S&P 500 top 60 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "JPM", "V", "JNJ", "UNH", "PG", "MA", "HD", "BAC", "XOM", "CVX",
     "LLY", "PFE", "ABBV", "MRK", "KO", "PEP", "TMO", "COST", "DHR",
     "ACN", "LIN", "TXN", "NEE", "VZ", "CSCO", "ABT", "UPS", "BMY",
@@ -43,39 +43,39 @@ VALID_TICKERS = {
     "MS", "WFC", "BLK", "C", "AXP", "USB", "PNC", "TGT", "WMT",
     "BRK", "BRKB", "T", "CMCSA", "MDT", "CVS", "CI", "HUM", "ANTM",
     "SYK", "ZTS", "ISRG", "BSX", "ELV", "MCK",
-    # ── Nasdaq 100 supplémentaires ───────────────────────────────────────────
+    # â”€â”€ Nasdaq 100 supplÃ©mentaires â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "ADBE", "REGN", "GILD", "AMGN", "BIIB", "MRNA", "PANW", "FTNT",
     "CRWD", "OKTA", "DDOG", "NET", "TEAM", "WDAY", "NOW", "VEEV",
     "ZM", "DOCU", "ORCL", "IBM", "HPQ", "DELL", "STX", "WDC",
     "SWKS", "KLAC", "AMAT", "LRCX", "MCHP", "ON", "TER", "ENTG",
     "MPWR", "NFLX", "DIS", "PYPL", "SHOP", "UBER", "SNAP", "PINS",
     "SPOT", "ROKU", "COIN", "TTD", "RBLX", "HOOD",
-    # ── Semi-conducteurs / Hardware ──────────────────────────────────────────
+    # â”€â”€ Semi-conducteurs / Hardware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "QRVO", "WOLF", "CREE", "SLAB", "MTSI", "ACLS", "ONTO", "FORM",
     "RMBS", "POWI", "DIOD", "IXYS",
-    # ── Énergie / Matières premières ─────────────────────────────────────────
+    # â”€â”€ Ã‰nergie / MatiÃ¨res premiÃ¨res â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "OXY", "SLB", "HAL", "BKR", "EOG", "COP", "PSX", "MPC", "VLO",
     "DVN", "FANG", "EQT", "FCX", "NEM", "GOLD",
-    # ── Finance / Crypto-related ─────────────────────────────────────────────
+    # â”€â”€ Finance / Crypto-related â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "MSTR", "MARA", "RIOT", "HUT", "CLSK", "SQ", "SOFI",
-    # ── ETFs majeurs (signaux valides) ────────────────────────────────────────
+    # â”€â”€ ETFs majeurs (signaux valides) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "SPY", "QQQ", "IWM", "GLD", "SLV", "TLT", "HYG", "XLK", "XLF",
     "ARKK", "SQQQ", "TQQQ", "SPXU", "UVXY",
-    # ── Autos / Véhicules électriques ─────────────────────────────────────────
+    # â”€â”€ Autos / VÃ©hicules Ã©lectriques â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "F", "GM", "RIVN", "LCID", "NIO", "XPEV", "LI",
-    # ── Transports / Voyage ──────────────────────────────────────────────────
+    # â”€â”€ Transports / Voyage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "BA", "AAL", "DAL", "UAL", "LUV", "CCL", "RCL",
-    # ── Retail / Consommation ────────────────────────────────────────────────
+    # â”€â”€ Retail / Consommation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "NKE", "LULU", "TJX", "ROST", "DECK", "GPS", "COLM",
-    # ── Biotech / Santé ───────────────────────────────────────────────────────
+    # â”€â”€ Biotech / SantÃ© â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "BMRN", "ALNY", "VRTX", "SGEN", "INCY", "RARE", "FOLD",
-    # ── Meme stocks historiques ───────────────────────────────────────────────
+    # â”€â”€ Meme stocks historiques â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     "GME", "AMC", "BB", "NOK",
 }
 
-# ── Blacklist — faux tickers, acronymes, mots courants sur Reddit ─────────────
-# Complète le TICKER_STOP de RedditScanner/main.py (communs aux deux).
-# Ces mots ne sont JAMAIS des tickers valides, même s'ils sont en majuscules.
+# â”€â”€ Blacklist â€” faux tickers, acronymes, mots courants sur Reddit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ComplÃ¨te le TICKER_STOP de RedditScanner/main.py (communs aux deux).
+# Ces mots ne sont JAMAIS des tickers valides, mÃªme s'ils sont en majuscules.
 TICKER_BLACKLIST = {
     # Acronymes financiers
     "AI", "CEO", "CFO", "COO", "CTO", "IPO", "ETF", "ATH", "DD",
@@ -89,7 +89,7 @@ TICKER_BLACKLIST = {
     # Monnaies / Macro
     "USD", "EUR", "GBP", "JPY", "CNY", "USA", "FED", "SEC",
     "FDIC", "GDP", "CPI", "NFP", "ADP", "ISM", "OTC",
-    # Mots génériques souvent en majuscules sur Reddit
+    # Mots gÃ©nÃ©riques souvent en majuscules sur Reddit
     "THE", "AND", "FOR", "ALL", "NEW", "TOP", "NOW", "ARE",
     "MOST", "WITH", "LIST", "HUGE", "MONEY", "BETA", "FLOW",
     "BEST", "NEXT", "EACH", "SOME", "LIVE", "TIME", "BACK",
@@ -100,21 +100,21 @@ TICKER_BLACKLIST = {
     "REAL", "RATE", "OPEN", "GAIN", "LOSS", "ZERO", "STOP",
     "DOWN", "HALF", "NEWS", "ALERT", "ALERTS", "TARGET", "UPDATE",
     "MAIN", "EDIT", "FWIW", "AFAIK", "IIRC", "IMHO", "IIRC",
-    # Mots anglais courants détectés comme faux tickers
+    # Mots anglais courants dÃ©tectÃ©s comme faux tickers
     "WELL", "LOW", "CLOSE", "LIKE", "MAKE", "MADE", "MUCH",
     "THEM", "THEN", "YOUR", "SAFE", "CASH", "DEBT", "FUND",
     "BOND", "BANK", "GOLD", "CORE", "TECH", "GROW", "DROP",
     "PEAK", "DIPS", "FREE", "RUNS", "SAVE", "EASY", "FAST",
     "RARE", "SURE", "STAY", "KEEP", "CARE", "HOPE", "FEAR",
     "ONES", "TAKE", "TURN", "LIFE", "WORK",
-    # Faux tickers observés en production
+    # Faux tickers observÃ©s en production
     "VIST", "FEMY", "SIVB",
     # Verbes, pronoms et mots courts courants en majuscules
     "ANY", "GET", "GOT", "HAS", "HAD", "HOW", "WHO", "WHY",
     "WAY", "DAY", "BIG", "OLD", "OWN", "SET", "TRY", "ASK",
     "RUN", "LET", "SAY", "USE", "MAN", "FAR", "END", "ADD",
     "AGO", "AVG",
-    # Faux tickers détectés sur r/buzztickr
+    # Faux tickers dÃ©tectÃ©s sur r/buzztickr
     "MAR", "JAN", "FEB", "APR", "MAY", "JUN", "JUL", "AUG",
     "SEP", "OCT", "NOV", "DEC", "VOO", "BEAR", "BULL",
 }
@@ -122,9 +122,9 @@ TICKER_BLACKLIST = {
 
 def is_known_ticker(ticker: str) -> bool:
     """
-    Retourne True si le ticker appartient à la liste VALID_TICKERS.
-    Les tickers de la watchlist perso (WATCHLIST) sont aussi considérés connus.
-    Ne prend PAS en compte la blacklist (celle-ci est filtrée en amont).
+    Retourne True si le ticker appartient Ã  la liste VALID_TICKERS.
+    Les tickers de la watchlist perso (WATCHLIST) sont aussi considÃ©rÃ©s connus.
+    Ne prend PAS en compte la blacklist (celle-ci est filtrÃ©e en amont).
     """
     return ticker in VALID_TICKERS or ticker in set(WATCHLIST)
 
@@ -144,51 +144,6 @@ def find_scanner_dir():
         if (p / "main.py").exists():
             return p
     return None
-
-
-def run_scanner(scanner_dir, refresh=True, cache_ttl=1800):
-    """Lance le scanner Reddit PRO v4."""
-    cmd = [
-        sys.executable, "main.py",
-        "--cache-ttl", str(cache_ttl),
-        "--prefer-new",
-    ]
-    if refresh:
-        cmd.append("--refresh")
-
-    try:
-        import os
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-
-        result = subprocess.run(
-            cmd,
-            cwd=str(scanner_dir),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
-
-        if result.returncode != 0:
-            print(f"  [Reddit] Erreur scanner : {result.stderr[:300]}")
-            return False
-
-        # Afficher le résumé
-        for line in result.stdout.split("\n"):
-            if any(line.startswith(e) for e in ("🐂", "🐻", "👤", "📊", "💾", "📈")):
-                print(f"  [Reddit] {line}")
-
-        return True
-
-    except subprocess.TimeoutExpired:
-        print("  [Reddit] Timeout (>2 min)")
-        return False
-    except Exception as e:
-        print(f"  [Reddit] Erreur : {e}")
-        return False
 
 
 def read_watchlist(scanner_dir):
@@ -218,35 +173,27 @@ def read_signals(scanner_dir):
 
 def format_reddit_section(refresh=True):
     """
-    Lance le scanner, lit les résultats, formate pour le morning scan.
-    Retourne un string formaté ou None si indisponible.
+    Lance le scanner, lit les rÃ©sultats, formate pour le morning scan.
+    Retourne un string formatÃ© ou None si indisponible.
     """
     if not PANDAS_AVAILABLE:
-        print("  [Reddit] pandas non installé. Lance : pip install pandas")
+        print("  [Reddit] pandas non installÃ©. Lance : pip install pandas")
         return None
 
     scanner_dir = find_scanner_dir()
     if scanner_dir is None:
-        print("  [Reddit] Scanner non trouvé.")
-        print(f"  [Reddit] Chemins testés :")
+        print("  [Reddit] Scanner non trouvÃ©.")
+        print(f"  [Reddit] Chemins testÃ©s :")
         for p in SCANNER_PATHS:
-            print(f"    {p} → {'TROUVÉ' if (p / 'main.py').exists() else 'non'}")
+            print(f"    {p} â†’ {'TROUVÃ‰' if (p / 'main.py').exists() else 'non'}")
         return None
 
-    print(f"  [Reddit] Scanner trouvé : {scanner_dir}")
+    print(f"  [Reddit] Scanner trouvÃ© : {scanner_dir}")
 
-    # Lancer le scan
-    if refresh:
-        success = run_scanner(scanner_dir, refresh=True, cache_ttl=1800)
-        if not success:
-            # Réessayer avec le cache
-            print("  [Reddit] Scan frais échoué, essai avec cache...")
-            run_scanner(scanner_dir, refresh=False, cache_ttl=7200)
-
-    # Lire les résultats
+    # Lire les rÃ©sultats
     df = read_watchlist(scanner_dir)
     if df is None or df.empty:
-        print("  [Reddit] Pas de données dans reddit_watchlist.csv")
+        print("  [Reddit] Pas de donnÃ©es dans reddit_watchlist.csv")
         return None
 
     signals = read_signals(scanner_dir)
@@ -280,7 +227,7 @@ def format_reddit_section(refresh=True):
             net_sent = int(row.get("Net_Sentiment", 0))
             style = row.get("Trade_Style", "?")
             emoji = EMOJI_BULL if net_sent > 0 else EMOJI_BEAR if net_sent < 0 else EMOJI_NEUTRAL
-            lines.append(f"  {emoji} *{ticker}* — {mentions} mentions | sent:{net_sent:+d} | {style}")
+            lines.append(f"  {emoji} *{ticker}* â€” {mentions} mentions | sent:{net_sent:+d} | {style}")
         lines.append("")
 
     # Top tickers hors watchlist
@@ -293,7 +240,7 @@ def format_reddit_section(refresh=True):
             ticker = row["Ticker"]
             mentions = int(row["Mentions"])
             style = row.get("Trade_Style", "?")
-            lines.append(f"  👀 {ticker} — {mentions} mentions | {style}")
+            lines.append(f"  ðŸ‘€ {ticker} â€” {mentions} mentions | {style}")
 
     return "\n".join(lines)
 
@@ -321,7 +268,7 @@ def scan_buzztickers() -> list:
                     tickers_found[t] = tickers_found.get(t, 0) + 1
         results = [{"ticker": t, "mentions": c, "source": "buzztickers"}
                    for t, c in sorted(tickers_found.items(), key=lambda x: -x[1])]
-        print(f"  [buzztickers] {len(results)} tickers trouvés : {[r['ticker'] for r in results[:10]]}")
+        print(f"  [buzztickers] {len(results)} tickers trouvÃ©s : {[r['ticker'] for r in results[:10]]}")
         return results
     except Exception as e:
         print(f"  [buzztickers] Erreur: {e}")
@@ -333,21 +280,21 @@ def get_reddit_discoveries(
     min_mentions_buzz:     int = 1,
 ) -> list[dict]:
     """
-    Retourne les tickers HORS watchlist découverts sur Reddit + r/buzztickr.
+    Retourne les tickers HORS watchlist dÃ©couverts sur Reddit + r/buzztickr.
 
     Logique :
       - Source 1 (Reddit CSV) : hors watchlist, >= min_mentions_reddit, hors blacklist
       - Source 2 (buzztickr)  : hors watchlist, >= min_mentions_buzz, hors blacklist
-        → PAS de filtre market_cap ni verify_ticker pour buzztickr (signal trending suffisant)
-      - Fusion : si ticker dans les deux → source="both", mentions additives
-      - Enrichissement LÉGER : price + change_pct via yfinance history(2d) seulement
-        (pas de market_cap, pas de sector, pas de tk.info — trop lent)
-      - Tri : "both" d'abord, puis par mentions décroissantes
+        â†’ PAS de filtre market_cap ni verify_ticker pour buzztickr (signal trending suffisant)
+      - Fusion : si ticker dans les deux â†’ source="both", mentions additives
+      - Enrichissement LÃ‰GER : price + change_pct via yfinance history(2d) seulement
+        (pas de market_cap, pas de sector, pas de tk.info â€” trop lent)
+      - Tri : "both" d'abord, puis par mentions dÃ©croissantes
       - Retourne top 20 (max)
     """
     watchlist_set = set(WATCHLIST)
 
-    # ── Source 1 : Reddit CSV ─────────────────────────────────────────────────
+    # â”€â”€ Source 1 : Reddit CSV â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     all_discoveries: list[dict] = []
 
     if PANDAS_AVAILABLE:
@@ -386,14 +333,14 @@ def get_reddit_discoveries(
                     "verified":        True,
                 })
         else:
-            print("  [Discoveries] Reddit CSV : aucune donnée disponible")
+            print("  [Discoveries] Reddit CSV : aucune donnÃ©e disponible")
     else:
         print("  [Discoveries] Reddit CSV : pandas non disponible")
 
     csv_tickers = {d["ticker"] for d in all_discoveries}
     print(f"  [Discoveries] Source Reddit CSV : {len(all_discoveries)} tickers")
 
-    # ── Source 2 : buzztickr ──────────────────────────────────────────────────
+    # â”€â”€ Source 2 : buzztickr â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     buzz_results = scan_buzztickers()
     added_buzz = 0
     for r in buzz_results:
@@ -426,14 +373,14 @@ def get_reddit_discoveries(
             })
             added_buzz += 1
 
-    print(f"  [Discoveries] Source buzztickr : {len(buzz_results)} bruts, {added_buzz} nouveaux ajoutés")
+    print(f"  [Discoveries] Source buzztickr : {len(buzz_results)} bruts, {added_buzz} nouveaux ajoutÃ©s")
     print(f"  [Discoveries] Total avant enrichissement : {len(all_discoveries)} tickers")
 
-    # ── Tri : "both" d'abord, puis mentions ───────────────────────────────────
+    # â”€â”€ Tri : "both" d'abord, puis mentions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     all_discoveries.sort(key=lambda x: (x["source"] == "both", x["mentions"]), reverse=True)
     top = all_discoveries[:20]
 
-    # ── Enrichissement LÉGER : price + change_pct seulement ──────────────────
+    # â”€â”€ Enrichissement LÃ‰GER : price + change_pct seulement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         import yfinance as yf
         _yf_ok = True
@@ -461,25 +408,23 @@ def get_reddit_discoveries(
                         d["vol_relative"] = round(last_vol / avg_vol, 2)
                 enriched_count += 1
         except Exception:
-            pass  # price reste None — affiché "—" dans le dashboard
+            pass  # price reste None â€” affichÃ© "â€”" dans le dashboard
 
     print(f"  [Discoveries] Enrichissement yfinance : {enriched_count}/{len(top)} tickers enrichis")
-    print(f"  [Discoveries] Résultat final : {len(top)} trouvailles")
+    print(f"  [Discoveries] RÃ©sultat final : {len(top)} trouvailles")
     for d in top[:10]:
         print(f"    {d['ticker']:6s}  mentions={d['mentions']:3d}  source={d['source']:12s}  price={d['price']}")
-
     return top
 
 
-# ── Cache module-level pour scan_reddit_direct ────────────────────────────────
-_DIRECT_CACHE: dict = {"data": None, "expires": 0.0}
+# â”€â”€ Cache module-level pour scan_reddit_direct â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
     """
-    Implémentation interne du scan Reddit direct.
-    Retourne un dict complet avec watchlist_results, discovery_results et métadonnées.
-    Utilisé par scan_reddit_direct() (wrapper public → tuple).
+    ImplÃ©mentation interne du scan Reddit direct.
+    Retourne un dict complet avec watchlist_results, discovery_results et mÃ©tadonnÃ©es.
+    UtilisÃ© par scan_reddit_direct() (wrapper public â†’ tuple).
     """
     import requests
     import re
@@ -489,13 +434,12 @@ def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
     now = _time.time()
 
     # Retourner le cache si encore valide
-    if _DIRECT_CACHE["data"] is not None and now < _DIRECT_CACHE["expires"]:
-        result = dict(_DIRECT_CACHE["data"])
+    cached = cache_get("reddit_direct")
+    if cached is not None:
+        result = dict(cached)
         result["from_cache"] = True
-        remaining = int(_DIRECT_CACHE["expires"] - now)
-        print(f"  [reddit_direct] Cache valide ({remaining}s restantes)")
+        print("  [reddit_direct] Cache valide")
         return result
-
     SUBREDDITS = [
         "stocks", "wallstreetbets", "investing",
         "Daytrading", "StockMarket", "options", "buzztickr",
@@ -503,7 +447,7 @@ def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
     watchlist_set = set(t.upper() for t in WATCHLIST)
     headers = {"User-Agent": "SMC-AI-Scanner/2.0"}
 
-    ticker_data: dict = {}   # ticker → {mentions, score_sum, upvote_sum, count, subreddits}
+    ticker_data: dict = {}   # ticker â†’ {mentions, score_sum, upvote_sum, count, subreddits}
     total_posts = 0
 
     for sub in SUBREDDITS:
@@ -586,16 +530,16 @@ def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
         elif mentions >= 1:
             discovery_results.append(entry)
 
-    # Trier watchlist par mentions décroissantes
+    # Trier watchlist par mentions dÃ©croissantes
     watchlist_results.sort(key=lambda x: -x["mentions"])
 
-    # Compléter la watchlist avec les tickers à 0 mentions
+    # ComplÃ©ter la watchlist avec les tickers Ã  0 mentions
     found_wl = {r["ticker"] for r in watchlist_results}
     for tk in sorted(watchlist_set):
         if tk not in found_wl:
             watchlist_results.append({
                 "ticker": tk, "mentions": 0, "net_sentiment": 0,
-                "sentiment_label": "NEUTRAL", "trade_style": "—",
+                "sentiment_label": "NEUTRAL", "trade_style": "â€”",
                 "subreddits": [], "in_watchlist": True, "verified": True,
                 "source": "reddit_direct", "cross_validated": False,
                 "trend": "NEW", "trend_pct": None, "mentions_avg_5d": None,
@@ -604,7 +548,7 @@ def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
 
     discovery_results.sort(key=lambda x: -x["mentions"])
 
-    print(f"  [reddit_direct] Résultat : "
+    print(f"  [reddit_direct] RÃ©sultat : "
           f"{sum(1 for r in watchlist_results if r['mentions'] > 0)} watchlist actifs, "
           f"{len(discovery_results[:20])} trouvailles")
 
@@ -617,8 +561,7 @@ def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
     }
 
     # Mettre en cache
-    _DIRECT_CACHE["data"]    = result
-    _DIRECT_CACHE["expires"] = now + cache_ttl
+    cache_set("reddit_direct", result, cache_ttl)
 
     return result
 
@@ -626,15 +569,15 @@ def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
 def scan_reddit_direct(cache_ttl: int = 1800):
     """
     Scrape le JSON public Reddit (7 subreddits) et retourne (watchlist_results, discovery_results).
-    Source principale pour /api/reddit — pas de CSV, pas de subprocess.
+    Source principale pour /api/reddit â€” pas de CSV, pas de subprocess.
 
     Args:
-        cache_ttl: durée du cache en secondes (défaut 30 min). 0 = scan frais forcé.
+        cache_ttl: durÃ©e du cache en secondes (dÃ©faut 30 min). 0 = scan frais forcÃ©.
 
     Returns:
         tuple: (watchlist_results, discovery_results)
-            watchlist_results : liste des 22 tickers watchlist (y compris à 0 mentions)
-            discovery_results : tickers hors watchlist triés par mentions décroissantes
+            watchlist_results : liste des 22 tickers watchlist (y compris Ã  0 mentions)
+            discovery_results : tickers hors watchlist triÃ©s par mentions dÃ©croissantes
     """
     result = _scan_reddit_impl(cache_ttl)
     return (result["watchlist_results"], result["discovery_results"])
@@ -650,9 +593,9 @@ if __name__ == "__main__":
         print(f"  {b['ticker']:6s}  {b['mentions']} mentions  [{b['source']}]")
 
     print("\n--- scan_reddit_direct() ---")
-    direct = scan_reddit_direct(cache_ttl=0)   # cache_ttl=0 → scan frais à chaque test
+    direct = scan_reddit_direct(cache_ttl=0)   # cache_ttl=0 â†’ scan frais Ã  chaque test
     wl = [r for r in direct["watchlist_results"] if r["mentions"] > 0]
-    print(f"  Watchlist actifs : {len(wl)}/{len(direct['watchlist_results'])} | Posts scannés : {direct['total_posts']}")
+    print(f"  Watchlist actifs : {len(wl)}/{len(direct['watchlist_results'])} | Posts scannÃ©s : {direct['total_posts']}")
     print(f"  Depuis le cache : {direct['from_cache']}")
     for r in wl[:10]:
         sent = f"+{r['net_sentiment']}" if r['net_sentiment'] >= 0 else str(r['net_sentiment'])
@@ -666,4 +609,4 @@ if __name__ == "__main__":
     if section:
         print(section)
     else:
-        print("Scanner non trouvé ou pas de données.")
+        print("Scanner non trouvÃ© ou pas de donnÃ©es.")

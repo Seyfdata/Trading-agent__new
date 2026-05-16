@@ -32,8 +32,7 @@ except ImportError:
             pass
         return obj
 
-# ── Mode de fonctionnement ────────────────────────────────────────────────────
-DEMO_MODE = True   # Passer à False pour activer Claude API (Phase 3B)
+from config.settings import DEMO_MODE
 
 # ── Dépendances optionnelles ──────────────────────────────────────────────────
 try:

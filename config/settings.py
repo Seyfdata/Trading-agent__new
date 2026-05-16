@@ -171,3 +171,8 @@ EMOJI_FIRE = "ðŸ”¥"
 EMOJI_NO = "ðŸš«"
 EMOJI_CHECK = "âœ…"
 
+
+# === DEMO MODE ===
+# True = analyse algorithmique pure (yfinance + pandas)
+# False = délègue à Claude API (Phase 3B, non implémenté)
+DEMO_MODE = True

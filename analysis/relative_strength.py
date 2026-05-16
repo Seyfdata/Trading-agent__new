@@ -1,4 +1,4 @@
-"""
+﻿"""
 Relative Strength Scout — Classe les tickers par alpha vs SPY sur 1W/1M/3M.
 Analyse technique approfondie (ADX, short interest) sur les top N.
 Cache 5 min. Zéro coût API — yfinance uniquement.
@@ -31,23 +31,10 @@ except Exception:
     ]
 
 from analysis.technical_indicators import analyze_ticker, clean_for_json
+from core.cache import cache_get, cache_set
 
 _PERIOD_SESSIONS = {"1w": 5, "1m": 21, "3m": 63}
 
-# Cache simple TTL 5 min
-_CACHE: dict = {}
-_CACHE_TTL = 300
-
-
-def _cache_get(key: str):
-    entry = _CACHE.get(key)
-    if entry and time.time() < entry["expires"]:
-        return entry["data"]
-    return None
-
-
-def _cache_set(key: str, data, ttl: int = _CACHE_TTL):
-    _CACHE[key] = {"data": data, "expires": time.time() + ttl}
 
 
 def _safe_float(v) -> Optional[float]:
@@ -72,7 +59,7 @@ def calc_alpha(ticker: str, benchmark: str = "SPY", periods: list | None = None)
 
     ticker = ticker.upper()
     cache_key = f"alpha_{ticker}_{benchmark}"
-    cached = _cache_get(cache_key)
+    cached = cache_get(cache_key)
     if cached is not None:
         print(f"[RelStrength] {ticker}: depuis cache")
         return cached
@@ -147,7 +134,7 @@ def calc_alpha(ticker: str, benchmark: str = "SPY", periods: list | None = None)
                 print(f"[RelStrength] {ticker} period={period} error: {e}")
                 continue
 
-        _cache_set(cache_key, result)
+        cache_set(cache_key, result, 300)
         print(f"[RelStrength] {ticker}: alpha 1w={result['alpha'].get('1w')} 1m={result['alpha'].get('1m')} 3m={result['alpha'].get('3m')}")
         return result
 
@@ -178,7 +165,7 @@ def rank_watchlist_by_alpha(tickers: list | None = None, ranking_period: str = "
         tickers = list(_DEFAULT_WATCHLIST)
 
     cache_key = f"rank_{ranking_period}_{'_'.join(sorted(tickers))}"
-    cached = _cache_get(cache_key)
+    cached = cache_get(cache_key)
     if cached is not None:
         print(f"[RelStrength] Ranking depuis cache ({ranking_period})")
         return cached
@@ -218,7 +205,7 @@ def rank_watchlist_by_alpha(tickers: list | None = None, ranking_period: str = "
         row["rank"] = i + 1
         ranked.append(row)
 
-    _cache_set(cache_key, ranked)
+    cache_set(cache_key, ranked, 300)
     print(f"[RelStrength] Classement terminé. #1: {ranked[0]['ticker'] if ranked else 'N/A'}")
     return ranked
 
@@ -325,7 +312,7 @@ def deep_analysis(ticker: str) -> dict:
     """
     ticker = ticker.upper()
     cache_key = f"deep_{ticker}"
-    cached = _cache_get(cache_key)
+    cached = cache_get(cache_key)
     if cached is not None:
         print(f"[RelStrength] deep_analysis {ticker}: depuis cache")
         return cached
@@ -334,7 +321,7 @@ def deep_analysis(ticker: str) -> dict:
     base = analyze_ticker(ticker)
     if base.get("error"):
         result = {"ticker": ticker, "error": base["error"]}
-        _cache_set(cache_key, result)
+        cache_set(cache_key, result, 300)
         return result
 
     rsi        = base.get("rsi")
@@ -430,7 +417,7 @@ def deep_analysis(ticker: str) -> dict:
     }
 
     result = clean_for_json(result)
-    _cache_set(cache_key, result)
+    cache_set(cache_key, result, 300)
     print(f"[RelStrength] {ticker}: snapshot='{snapshot}' alpha_1m={alpha_1m}")
     return result
 
