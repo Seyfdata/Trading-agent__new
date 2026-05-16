@@ -2472,6 +2472,11 @@ function SmcTab(props) {
   var liq = analysis ? (analysis.liquidity        || {}) : {};
   var obs = analysis ? (analysis.order_blocks     || []) : [];
   var fvgs = analysis ? (analysis.fvg             || []) : [];
+  var asianRange     = analysis ? (analysis.asian_range   || {}) : {};
+  var sweeps         = analysis ? (analysis.sweeps         || []) : [];
+  var validChoch     = analysis ? (analysis.valid_choch    || false) : false;
+  var ud             = unifiedData[selectedTicker] || {};
+  var killzoneActive = ud.killzone_active || false;
 
   var inp = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', color: 'var(--text)', fontFamily: 'JetBrains Mono,monospace', fontSize: 12 };
 
@@ -2549,6 +2554,38 @@ function SmcTab(props) {
         <span style={{ fontSize: 11, color: 'var(--muted)' }}>Analyse algorithmique — passez en MODE LIVE avec Claude API pour des analyses plus fines</span>
       </div>
 
+
+      {/* Contextual Timing — NY Killzone & Plage Overnight */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200, background: killzoneActive ? "rgba(16,185,129,.12)" : "rgba(100,100,100,.06)", border: "1px solid " + (killzoneActive ? "#10b981" : "var(--border)"), borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {killzoneActive
+              ? React.createElement("span", { style: { background: "#10b981", color: "#000", borderRadius: 4, padding: "2px 8px", fontSize: 10, fontWeight: 700 } }, "● NY KILLZONE ACTIVE")
+              : React.createElement("span", { style: { background: "rgba(100,100,100,.15)", color: "var(--muted)", borderRadius: 4, padding: "2px 8px", fontSize: 10 } }, "○ OFF-HOURS")
+            }
+            <span style={{ fontSize: 11, color: "var(--muted)" }}>14h30–16h30 CET</span>
+          </div>
+          {killzoneActive && <div style={{ fontSize: 10, color: "#10b981", marginTop: 4 }}>⚡ Multiplicateur ×1.5 actif sur le score unifié</div>}
+        </div>
+        {asianRange.valid && (
+          <div style={{ flex: 1, minWidth: 200, background: "rgba(59,130,246,.06)", border: "1px solid rgba(59,130,246,.2)", borderRadius: 8, padding: "10px 14px" }}>
+            <div style={{ fontSize: 10, color: "#3b82f6", fontWeight: 600, marginBottom: 4 }}>🌏 PLAGE OVERNIGHT</div>
+            <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
+              <span>H: <strong style={{ color: "#ef4444" }}>${asianRange.high ? asianRange.high.toFixed(2) : "—"}</strong></span>
+              <span>L: <strong style={{ color: "#10b981" }}>${asianRange.low  ? asianRange.low.toFixed(2)  : "—"}</strong></span>
+              <span style={{ color: "var(--muted)", fontSize: 10 }}>{asianRange.source_bars} bougies</span>
+            </div>
+          </div>
+        )}
+        {sweeps.length > 0 && (
+          <div style={{ flex: 1, minWidth: 200, background: "rgba(245,158,11,.12)", border: "1px solid #f59e0b", borderRadius: 8, padding: "10px 14px" }}>
+            <div style={{ fontSize: 10, color: "#f59e0b", fontWeight: 600 }}>⚡ SWEEP OVERNIGHT DÉTECTÉ</div>
+            <div style={{ fontSize: 11, marginTop: 4 }}>{sweeps[0].type} @ ${sweeps[0].price ? sweeps[0].price.toFixed(2) : "—"}</div>
+            {validChoch && <div style={{ fontSize: 10, color: "#10b981", marginTop: 2 }}>✓ CHoCH valide post-sweep</div>}
+          </div>
+        )}
+      </div>
+
       {/* Sélecteur + boutons + toggle Mode */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={selectedTicker}
@@ -2617,7 +2654,7 @@ function SmcTab(props) {
         if (!ud) return null;
         var gc = _gradeColor(ud.grade);
         var isAPlus = ud.grade === 'A+';
-        var bdLabels = { discount_zone: 'Discount Zone', sma200_bounce: 'SMA200 Bounce', volume_momentum: 'Volume Momentum', htf_bull: 'HTF Bull', in_discount_or_ote: 'Discount/OTE', fresh_ob_nearby: 'Bull OB frais', fvg_nearby: 'FVG actif', ssl_swept: 'SSL balayé', confluences_strong: 'Confluences ≥4', options_bullish: 'Options BULLISH' };
+        var bdLabels = { discount_zone: 'Discount Zone', sma200_bounce: 'SMA200 Bounce', volume_momentum: 'Volume Momentum', htf_bull: 'HTF Bull', in_discount_or_ote: 'Discount/OTE', fresh_ob_nearby: 'Bull OB frais', fvg_nearby: 'FVG actif', ssl_swept: 'SSL balayé', confluences_strong: 'Confluences ≥4', options_bullish: 'Options BULLISH', sweep_detected: 'Sweep overnight', valid_choch: 'CHoCH post-sweep', price_in_fvg: 'Prix dans FVG', in_premium: 'Zone Premium (malus)', killzone_active: 'NY Killzone (×1.5)' };
         var bdEntries = Object.keys(ud.scoring_breakdown || {}).map(function(k) { return { k: k, v: (ud.scoring_breakdown || {})[k] }; });
         return (
           <div className="mb16">
@@ -2631,6 +2668,26 @@ function SmcTab(props) {
                 </div>
                 {ud.current_price != null && <span style={{ fontSize: 13, color: 'var(--muted)' }}>${Number(ud.current_price).toFixed(2)}</span>}
               </div>
+              {/* Tech/Ctx score bar + killzone */}
+              {ud.scoring_breakdown && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, fontSize: 10 }}>
+                  <span style={{ color: "var(--muted)" }}>Technique</span>
+                  <span style={{ fontWeight: 700, color: "#3b82f6" }}>{(ud.scoring_breakdown.tech_score || 0).toFixed(1)}</span>
+                  <span style={{ color: "var(--muted)" }}>·</span>
+                  <span style={{ color: "var(--muted)" }}>Contextuel</span>
+                  <span style={{ fontWeight: 700, color: "#8b5cf6" }}>{(ud.scoring_breakdown.ctx_score || 0).toFixed(1)}</span>
+                  {ud.scoring_breakdown.killzone_active && (
+                    <span style={{ background: "#10b981", color: "#000", borderRadius: 3, padding: "1px 6px", fontWeight: 700 }}>×1.5 KILLZONE</span>
+                  )}
+                  {ud.scoring_breakdown.in_premium && (
+                    <span style={{ background: "#ef4444", color: "#fff", borderRadius: 3, padding: "1px 6px" }}>⚠ PREMIUM</span>
+                  )}
+                  {ud.scoring_breakdown.macro_risk === "HIGH" && (
+                    <span style={{ background: "#f59e0b", color: "#000", borderRadius: 3, padding: "1px 6px" }}>🔴 MACRO</span>
+                  )}
+                </div>
+              )}
+
               {!expertMode ? (
                 <div style={{ display: 'flex', gap: 4, marginBottom: 12, alignItems: 'center' }}>
                   {bdEntries.map(function(item, i) {
