@@ -1,4 +1,4 @@
-"""
+﻿"""
 SMC Analyzer — Analyse Smart Money Concepts (algorithmique).
 
 DEMO_MODE = True  : analyse pure pandas/yfinance, sans appel API.
@@ -13,8 +13,24 @@ Usage :
 from __future__ import annotations
 
 import traceback
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
+
+try:
+    from analysis.technical_indicators import clean_for_json as _clean_for_json
+except ImportError:
+    def _clean_for_json(obj):  # type: ignore[misc]
+        import math, numpy as np  # noqa: F401
+        if isinstance(obj, dict):
+            return {k: _clean_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_clean_for_json(i) for i in obj]
+        try:
+            if hasattr(obj, "item"):
+                return obj.item()
+        except Exception:
+            pass
+        return obj
 
 # ── Mode de fonctionnement ────────────────────────────────────────────────────
 DEMO_MODE = True   # Passer à False pour activer Claude API (Phase 3B)
@@ -55,6 +71,222 @@ def _fmt_date(ts) -> str:
         return str(ts)[:10]
     except Exception:
         return "?"
+
+
+# ── 0. Sessions & Timezone ───────────────────────────────────────────────────
+
+_TZ_PARIS = "Europe/Paris"
+
+def detect_asian_range(ticker: str) -> dict:
+    """
+    Plage de reference overnight pour actions US (proxy session Asie).
+
+    Les actions US ne tradent pas 01h-06h CET. On utilise donc :
+    1. prepost=True : after-hours (>=22h CET) hier + pre-market (<10h CET) auj.
+    2. Fallback : High/Low de la veille si pas de donnees overnight.
+    """
+    empty = {"high": None, "low": None, "date": None, "valid": False, "source_bars": 0}
+    if not _YF_OK or not _PANDAS_OK:
+        return empty
+    try:
+        df = yf.Ticker(ticker).history(period="5d", interval="1h", prepost=True)
+        if df is None or df.empty:
+            return empty
+
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert(_TZ_PARIS)
+        else:
+            df.index = df.index.tz_convert(_TZ_PARIS)
+
+        today = df.index[-1].date()
+
+        for delta in range(0, 5):
+            target_date = today - timedelta(days=delta)
+            prev_date   = target_date - timedelta(days=1)
+            overnight = df[
+                ((df.index.date == prev_date) & (df.index.hour >= 22)) |
+                ((df.index.date == target_date) & (df.index.hour < 10))
+            ]
+            if len(overnight) >= 1:
+                h = round(float(overnight["High"].max()), 2)
+                l = round(float(overnight["Low"].min()),  2)
+                result = {"high": h, "low": l, "date": str(target_date), "valid": True, "source_bars": len(overnight)}
+                print(f"[SMC-Logic] Asian Range {ticker}: H={h:.2f} L={l:.2f} ({target_date}, {len(overnight)} bars overnight)")
+                return result
+
+        # Fallback : plage J-1
+        df_daily = yf.Ticker(ticker).history(period="5d", interval="1d")
+        if df_daily is not None and len(df_daily) >= 2:
+            prev = df_daily.iloc[-2]
+            h = round(float(prev["High"]), 2)
+            l = round(float(prev["Low"]),  2)
+            d = str(df_daily.index[-2])[:10]
+            result = {"high": h, "low": l, "date": d, "valid": True, "source_bars": 1}
+            print(f"[SMC-Logic] Asian Range {ticker} (J-1 fallback): H={h:.2f} L={l:.2f}")
+            return result
+
+        return empty
+    except Exception as exc:
+        print(f"[SMC-Logic] detect_asian_range error {ticker}: {exc}")
+        return empty
+
+def detect_liquidity_sweeps(ticker: str, asian_range: dict) -> list:
+    """
+    Détecte les sweeps de liquidité sur données 1h post-session Asie.
+
+    Sweep BSL (Buy-Side Liquidity) : High[i] > asian_high ET Close[i] < asian_high
+    Sweep SSL (Sell-Side Liquidity) : Low[i]  < asian_low  ET Close[i] > asian_low
+    """
+    sweeps: list[dict] = []
+    if not asian_range.get("valid") or not _YF_OK or not _PANDAS_OK:
+        return sweeps
+
+    asian_high = float(asian_range["high"])
+    asian_low  = float(asian_range["low"])
+    asia_date  = asian_range["date"]
+
+    try:
+        df = yf.Ticker(ticker).history(period="5d", interval="1h")
+        if df is None or df.empty:
+            return sweeps
+
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert(_TZ_PARIS)
+        else:
+            df.index = df.index.tz_convert(_TZ_PARIS)
+
+        # Bars AFTER the Asian session (hour >= 6 on the same day or later)
+        post_asia = df[
+            (df.index.strftime("%Y-%m-%d") >= str(asia_date)) &
+            (df.index.hour >= 6)
+        ]
+
+        for i in range(len(post_asia)):
+            bar      = post_asia.iloc[i]
+            bar_time = post_asia.index[i]
+            bar_h    = float(bar["High"])
+            bar_l    = float(bar["Low"])
+            bar_c    = float(bar["Close"])
+
+            # BSL sweep : wick above Asian High, but closes below
+            if bar_h > asian_high and bar_c < asian_high:
+                rejection_pct = round((bar_h - bar_c) / bar_h * 100, 2)
+                sweeps.append({
+                    "type":           "BSL",
+                    "price":          round(bar_h, 2),
+                    "close":          round(bar_c, 2),
+                    "asian_level":    asian_high,
+                    "date":           bar_time.strftime("%Y-%m-%dT%H:%M"),
+                    "bar_idx":        i,
+                    "rejection_pct":  rejection_pct,
+                })
+                print(f"[SMC-Logic] Asian Sweep BSL detected for {ticker} at {bar_h:.2f} (close={bar_c:.2f}, rejection={rejection_pct}%)")
+
+            # SSL sweep : wick below Asian Low, but closes above
+            elif bar_l < asian_low and bar_c > asian_low:
+                rejection_pct = round((bar_c - bar_l) / bar_c * 100, 2)
+                sweeps.append({
+                    "type":           "SSL",
+                    "price":          round(bar_l, 2),
+                    "close":          round(bar_c, 2),
+                    "asian_level":    asian_low,
+                    "date":           bar_time.strftime("%Y-%m-%dT%H:%M"),
+                    "bar_idx":        i,
+                    "rejection_pct":  rejection_pct,
+                })
+                print(f"[SMC-Logic] Asian Sweep SSL detected for {ticker} at {bar_l:.2f} (close={bar_c:.2f}, rejection={rejection_pct}%)")
+
+    except Exception as exc:
+        print(f"[SMC-Logic] detect_liquidity_sweeps error {ticker}: {exc}")
+
+    return sweeps
+
+
+def _detect_equal_levels(df: "pd.DataFrame", threshold: float = 0.0005) -> dict:
+    """
+    Détecte Equal Highs (EQH) et Equal Lows (EQL) avec tolérance 0.05%.
+    Utilisé pour identifier les pièges institutionnels (Inducement).
+    """
+    recent = df.tail(63).copy()
+    sh_list, sl_list = _detect_swings(recent, pivot=2)
+
+    eqh_levels: list[dict] = []
+    eql_levels: list[dict] = []
+
+    # Cluster swing highs
+    sh_used: set[int] = set()
+    for i, sh_i in enumerate(sh_list):
+        if i in sh_used:
+            continue
+        group = [sh_i]
+        for j, sh_j in enumerate(sh_list):
+            if j != i and j not in sh_used:
+                if abs(sh_i["price"] - sh_j["price"]) / max(sh_i["price"], 1e-9) <= threshold:
+                    group.append(sh_j)
+                    sh_used.add(j)
+        if len(group) >= 2:
+            avg_price = sum(g["price"] for g in group) / len(group)
+            eqh_levels.append({
+                "price":    round(avg_price, 2),
+                "count":    len(group),
+                "dates":    [g["date"] for g in group],
+                "last_idx": max(g["idx"] for g in group),
+            })
+
+    # Cluster swing lows
+    sl_used: set[int] = set()
+    for i, sl_i in enumerate(sl_list):
+        if i in sl_used:
+            continue
+        group = [sl_i]
+        for j, sl_j in enumerate(sl_list):
+            if j != i and j not in sl_used:
+                if abs(sl_i["price"] - sl_j["price"]) / max(sl_i["price"], 1e-9) <= threshold:
+                    group.append(sl_j)
+                    sl_used.add(j)
+        if len(group) >= 2:
+            avg_price = sum(g["price"] for g in group) / len(group)
+            eql_levels.append({
+                "price":    round(avg_price, 2),
+                "count":    len(group),
+                "dates":    [g["date"] for g in group],
+                "last_idx": max(g["idx"] for g in group),
+            })
+
+    return {"eqh": eqh_levels, "eql": eql_levels}
+
+
+def _flag_inducement(obs: list, eq_levels: dict, threshold_pct: float = 0.02) -> list:
+    """
+    Flags les OBs qui sont des pièges institutionnels (Inducement).
+
+    Bull OB avec EQH juste au-dessus (< 2%) = stops retail ciblés → Danger.
+    Bear OB avec EQL juste en-dessous (< 2%) = acheteurs piégés → Danger.
+    """
+    eqh_prices = [e["price"] for e in eq_levels.get("eqh", [])]
+    eql_prices = [e["price"] for e in eq_levels.get("eql", [])]
+
+    for ob in obs:
+        ob["inducement"]        = False
+        ob["inducement_detail"] = None
+
+        if ob["type"] == "BULL":
+            for eqh_p in eqh_prices:
+                if eqh_p > ob["high"]:
+                    dist = (eqh_p - ob["high"]) / ob["high"]
+                    if dist <= threshold_pct:
+                        ob["inducement"]        = True
+                        ob["inducement_detail"] = f"EQH ${eqh_p:.2f} au-dessus — stops retail ciblés"
+                        break
+        elif ob["type"] == "BEAR":
+            for eql_p in eql_prices:
+                if eql_p < ob["low"]:
+                    dist = (ob["low"] - eql_p) / ob["low"]
+                    if dist <= threshold_pct:
+                        ob["inducement"]        = True
+                        ob["inducement_detail"] = f"EQL ${eql_p:.2f} en-dessous — puits de liquidité"
+                        break
+    return obs
 
 
 # ── 1. Structure de marché ────────────────────────────────────────────────────
@@ -278,7 +510,7 @@ def _detect_order_blocks(df: "pd.DataFrame", current_price: float) -> list[dict]
 
 # ── 3. Fair Value Gaps ───────────────────────────────────────────────────────
 
-def _detect_fvg(df: "pd.DataFrame", current_price: float) -> list[dict]:
+def _detect_fvg(df: "pd.DataFrame", current_price: float, range_midpoint: "float | None" = None) -> list[dict]:
     """
     Détecte les Fair Value Gaps actifs (fenêtre : 3 derniers mois, ~63 bougies).
 
@@ -286,9 +518,9 @@ def _detect_fvg(df: "pd.DataFrame", current_price: float) -> list[dict]:
     Bear FVG : high[i+2] < low[i]  — gap laissé par un mouvement baissier
 
     Critères de qualité :
-      - Bougie centrale (imbalance) impulsive : corps > 60 % du range
       - Taille du gap > 0.2 % du prix actuel (filtrer micro-gaps)
-
+      - Taille du gap > 0.2 % du prix actuel (filtrer micro-gaps)
+    Filtre Discount : si range_midpoint fourni, seuls les FVG Bull sous le midpoint sont gardés.
     Statut de remplissage (via prix actuel) :
       not filled          : prix n'a pas encore touché la zone
       partially_filled    : prix entré dans la zone mais < 50 % absorbé
@@ -320,6 +552,8 @@ def _detect_fvg(df: "pd.DataFrame", current_price: float) -> list[dict]:
 
             if current_price > 0 and gap_size / current_price < MIN_GAP_PCT:
                 continue
+            if range_midpoint is not None and gap_mid >= range_midpoint:
+                continue  # FVG Bull en zone Premium — ignoré (filtre Discount)
 
             # Prix descend dans le gap depuis le haut (gap_high)
             if current_price <= gap_mid:
@@ -349,6 +583,8 @@ def _detect_fvg(df: "pd.DataFrame", current_price: float) -> list[dict]:
 
             if current_price > 0 and gap_size / current_price < MIN_GAP_PCT:
                 continue
+            if range_midpoint is not None and gap_mid <= range_midpoint:
+                continue  # FVG Bear en zone Discount — ignoré (filtre Premium)
 
             # Prix monte dans le gap depuis le bas (gap_low)
             if current_price >= gap_mid:
@@ -738,11 +974,34 @@ def analyze_ticker(ticker: str, timeframes: list | None = None) -> dict:
 
         current_price = float(df["Close"].iloc[-1])
 
+        # ── Pipeline SMC (ordre de dépendance) ───────────────────────────────
         structure   = _analyze_structure(df)
         obs         = _detect_order_blocks(df, current_price)
-        fvgs        = _detect_fvg(df, current_price)
         liquidity   = _detect_liquidity(df)
         dp          = _discount_premium(structure["swing_highs"], structure["swing_lows"], current_price)
+
+        # FVG filtré sur zone Discount grâce au midpoint
+        fvgs        = _detect_fvg(df, current_price, range_midpoint=dp.get("midpoint"))
+
+        # Niveaux égaux (EQH/EQL) → Inducement flags sur les OBs
+        eq_levels   = _detect_equal_levels(df)
+        obs         = _flag_inducement(obs, eq_levels)
+
+        # Session Asie + sweeps de liquidité (données 1h)
+        asian_range = detect_asian_range(ticker)
+        sweeps      = detect_liquidity_sweeps(ticker, asian_range)
+
+        # CHoCH valide uniquement s'il survient APRÈS un sweep de liquidité
+        last_choch  = structure.get("last_choch")
+        valid_choch = False
+        if last_choch and sweeps:
+            choch_date = last_choch.get("date", "")
+            for sw in sweeps:
+                if sw.get("date", "") <= choch_date:
+                    valid_choch = True
+                    break
+        print(f"[SMC-Logic] Valid CHoCH after sweep: {valid_choch} for {ticker}")
+
         confluences = _count_confluences(current_price, dp, obs, fvgs, df, structure)
         setup       = _build_setup(current_price, structure, obs, fvgs, liquidity, dp, confluences)
 
@@ -752,7 +1011,7 @@ def analyze_ticker(ticker: str, timeframes: list | None = None) -> dict:
             if not setup.get("rr_valid"):
                 print(f"[SMC] {ticker} REJETE : R:R {_rr:.2f} < 2.5")
 
-        return {
+        return _clean_for_json({
             "ticker":           ticker,
             "timeframe":        "1d",
             "analysis_date":    date.today().isoformat(),
@@ -765,8 +1024,12 @@ def analyze_ticker(ticker: str, timeframes: list | None = None) -> dict:
             "discount_premium": dp,
             "confluences":      confluences,
             "setup":            setup,
+            "asian_range":      asian_range,
+            "sweeps":           sweeps,
+            "equal_levels":     eq_levels,
+            "valid_choch":      valid_choch,
             "error":            None,
-        }
+        })
 
     except Exception as exc:
         base["error"] = f"Erreur analyse {ticker} : {exc}"
@@ -941,3 +1204,4 @@ if __name__ == "__main__":
         print(f"  Score: {cf['count']}/6 — {cf['conviction']}")
         for d in cf["details"]:
             print(f"  {d}")
+
