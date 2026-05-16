@@ -2586,6 +2586,26 @@ function SmcTab(props) {
         )}
       </div>
 
+      {/* SMC Health Bar */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, padding: "8px 12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 1, marginRight: 4 }}>SMC HEALTH</span>
+        {[
+          { label: "🌏 Sweep", active: sweeps.length > 0, color: "#f59e0b" },
+          { label: "⚡ Killzone", active: killzoneActive, color: "#10b981" },
+          { label: "📊 " + (dp.current_zone || "Zone"), active: dp.current_zone === "DISCOUNT" || dp.current_zone === "OTE", color: dp.current_zone === "DISCOUNT" ? "#10b981" : dp.current_zone === "OTE" ? "#3b82f6" : dp.current_zone === "PREMIUM" ? "#ef4444" : "#64748b" },
+          { label: "✓ CHoCH", active: validChoch, color: "#10b981" },
+        ].map(function(pill, i) {
+          return (
+            <span key={i} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 20, fontWeight: 600, background: pill.active ? pill.color + "20" : "transparent", color: pill.active ? pill.color : "var(--dim)", border: "1px solid " + (pill.active ? pill.color + "50" : "var(--border)") }}>
+              {pill.label}
+            </span>
+          );
+        })}
+        {dp.current_zone === "PREMIUM" && (
+          <span style={{ fontSize: 10, color: "#ef4444", marginLeft: "auto" }}>⚠ Prix en zone PREMIUM — LONG déconseillé</span>
+        )}
+      </div>
+
       {/* Sélecteur + boutons + toggle Mode */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={selectedTicker}
