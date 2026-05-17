@@ -103,6 +103,8 @@ from dashboard.routers.analysis import router as analysis_router
 app.include_router(analysis_router, prefix="/api")
 from dashboard.routers.trading import router as trading_router
 app.include_router(trading_router, prefix="/api")
+from dashboard.routers.scanners import router as scanners_router
+app.include_router(scanners_router, prefix="/api")
 # ── Helpers internes ────────────────────────────────────────────────────────
 
 _BULL_KW = {"surge", "beat", "rise", "growth", "gain", "record", "strong",
@@ -592,31 +594,6 @@ def monitor_positions():
         return {"error": str(e), "positions": [], "alerts": []}
 
 
-# ── Pullback Scanner ─────────────────────────────────────────────────────────
-
-@app.get("/api/pullbacks")
-def get_pullbacks():
-    """Scan de survente sur la watchlist (RSI<35, BB%B<0, Stoch<20) + contexte marché."""
-    try:
-        from analysis.pullback_scanner import scan_pullbacks
-        return clean_for_json(scan_pullbacks())
-    except Exception as e:
-        print(f"[API] /api/pullbacks error: {e}")
-        return {"error": str(e), "alerts": [], "watches": [], "no_alerts": []}
-
-
-@app.get("/api/relative-strength")
-def get_relative_strength(period: str = "1m", top: int = 2):
-    """Classement alpha vs SPY sur 1w/1m/3m + deep analysis top N."""
-    try:
-        from analysis.relative_strength import scan_relative_strength
-        top = max(1, min(5, top))
-        return scan_relative_strength(ranking_period=period, top_n=top)
-    except Exception as e:
-        print(f"[API] /api/relative-strength error: {e}")
-        return {"error": str(e), "ranking": [], "deep_analyses": []}
-
-
 # ── Alertes killzone ──────────────────────────────────────────────────────────
 
 
@@ -818,19 +795,6 @@ def get_alerts_news():
         return {"new_news": new_news, "total_checked": len(combined)}
     except Exception as e:
         return {"new_news": [], "total_checked": 0, "error": str(e)}
-
-
-# ── SMC Analysis ─────────────────────────────────────────────────────────────
-
-@app.get("/api/options/{ticker}")
-def get_options(ticker: str):
-    """Analyse du flux options (PCR, max pain, unusual activity, smart money) pour un ticker."""
-    try:
-        from analysis.options_flow import get_options_sentiment
-        result = get_options_sentiment(ticker.upper().strip())
-        return clean_for_json(result)
-    except Exception as e:
-        return {"error": str(e), "ticker": ticker}
 
 
 # ── Propositions de trade ────────────────────────────────────────────────────
@@ -1035,82 +999,6 @@ def get_setups(extra_tickers: str = ""):
             "scanned_at": datetime.now().isoformat(),
             "error": str(e),
         })
-
-
-# ── Backtesting ───────────────────────────────────────────────────────────────
-
-@app.get("/api/backtest/{ticker}")
-def get_backtest_ticker(
-    ticker:   str,
-    strategy: str = "ALL",
-    period:   str = "3y",
-):
-    """
-    Backtest mécanique sur un ticker.
-    strategy : DISCOUNT_ZONE | SMA200_BOUNCE | VOLUME_MOMENTUM | ALL
-    period   : 1y | 2y | 3y
-    Attention : peut prendre 5-30s selon le ticker et la période.
-    """
-    try:
-        from analysis.backtester import backtest_strategy, backtest_all_strategies, STRATEGIES
-        ticker = ticker.upper().strip()
-
-        if strategy == "ALL":
-            result = backtest_all_strategies(ticker, period=period)
-        elif strategy in STRATEGIES:
-            result = backtest_strategy(ticker, strategy, period=period)
-            # Envelopper dans le même format que ALL pour le dashboard
-            result = {
-                "ticker": ticker, "period": period,
-                "results": {strategy: result},
-                "best_strategy": strategy if result["total_trades"] > 0 else None,
-                "summary": {
-                    strategy: {
-                        "total_trades":  result["total_trades"],
-                        "winrate":       result["winrate"],
-                        "profit_factor": result["profit_factor"],
-                        "total_pnl":     result["total_pnl"],
-                        "max_drawdown":  result["max_drawdown"],
-                        "avg_hold_days": result["avg_hold_days"],
-                    }
-                },
-            }
-        else:
-            return {"error": f"Stratégie inconnue : {strategy}. Valeurs : {STRATEGIES + ['ALL']}"}
-
-        return clean_for_json(result)
-    except Exception as e:
-        return {"error": str(e), "ticker": ticker}
-
-
-@app.get("/api/backtest/report")
-def get_backtest_report(period: str = "3y", top_n: int = 10):
-    """
-    Rapport complet : 3 stratégies × top N tickers (lent : 2-5 min).
-    Retourne la meilleure stratégie globale + résultats par ticker.
-    """
-    try:
-        from analysis.backtester import backtest_full_report
-        tickers = _top_tickers_from_db_or_watchlist(top_n)
-        result  = backtest_full_report(tickers, period=period)
-        return clean_for_json(result)
-    except Exception as e:
-        return {"error": str(e)}
-
-
-def _top_tickers_from_db_or_watchlist(top_n: int) -> list:
-    """Retourne les top N tickers par score DB, fallback sur WATCHLIST[:top_n]."""
-    try:
-        import sqlite3 as _sq
-        with _sq.connect(DB_PATH) as conn:
-            rows = conn.execute(
-                "SELECT ticker FROM scores_history WHERE date=(SELECT MAX(date) FROM scores_history) ORDER BY total_score DESC LIMIT ?",
-                (top_n,),
-            ).fetchall()
-        tickers = [r[0] for r in rows]
-        return tickers if tickers else list(WATCHLIST)[:top_n]
-    except Exception:
-        return list(WATCHLIST)[:top_n]
 
 
 # ── Test pages ────────────────────────────────────────────────────────────────
