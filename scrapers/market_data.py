@@ -17,6 +17,8 @@ les indicateurs manuellement (RSI, SMA, EMA, MACD).
 
 import numpy as np
 
+from core.data_provider import get_history
+
 try:
     import yfinance as yf
     YF_AVAILABLE = True
@@ -163,8 +165,7 @@ def get_market_context():
     context = {}
     for ticker, name in MACRO_TICKERS.items():
         try:
-            data = yf.Ticker(ticker)
-            hist = data.history(period="5d")
+            hist = get_history(ticker, interval="1d", period="5d")
             if hist.empty or len(hist) < 2:
                 continue
             current = hist["Close"].iloc[-1]
@@ -242,8 +243,7 @@ def scan_watchlist(tickers=None):
     results = []
     for ticker in tickers:
         try:
-            data = yf.Ticker(ticker)
-            hist = data.history(period="1y")
+            hist = get_history(ticker, interval="1d", period="1y")
             if hist.empty or len(hist) < 10:
                 continue
 
@@ -315,8 +315,7 @@ def format_watchlist_scanner(results):
 def analyze_technicals(ticker_symbol):
     """Analyse technique complète pour un ticker."""
     try:
-        data = yf.Ticker(ticker_symbol)
-        hist = data.history(period="3mo")
+        hist = get_history(ticker_symbol, interval="1d", period="3mo")
         if hist.empty or len(hist) < 30:
             return None
 
@@ -402,8 +401,7 @@ def compute_bullish_score(ticker_symbol, scan_result=None):
     - Volume relatif > 1.5 : +0.5
     """
     try:
-        data = yf.Ticker(ticker_symbol)
-        hist = data.history(period="3mo")
+        hist = get_history(ticker_symbol, interval="1d", period="3mo")
         if hist.empty or len(hist) < 30:
             return None
 
