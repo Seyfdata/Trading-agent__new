@@ -9,6 +9,7 @@ from datetime import datetime
 
 from fastapi import APIRouter
 
+from core.data_provider import get_history, get_fast_info
 from config.settings import WATCHLIST
 from scrapers.market_data import get_market_context, scan_watchlist
 from scrapers.rss_news import fetch_and_filter
@@ -37,16 +38,10 @@ _MACRO_INDICATORS = [
 
 def _fetch_macro_indicators() -> list:
     """Récupère les indicateurs macro via yfinance. Try/except individuel par symbole."""
-    try:
-        import yfinance as yf
-    except ImportError:
-        return []
-
     results = []
     for ind in _MACRO_INDICATORS:
         try:
-            tk = yf.Ticker(ind["symbol"])
-            hist = tk.history(period="5d", interval="1d", auto_adjust=True)
+            hist = get_history(ind["symbol"], interval="1d", period="5d")
             if hist is None or hist.empty or len(hist) < 2:
                 results.append({"symbol": ind["symbol"], "name": ind["name"],
                                  "price": None, "change_pct": None})
@@ -282,16 +277,10 @@ def get_postmarket():
         "market_close": {}, "killzone_alerts_count": 0,
     }
     try:
-        import yfinance as yf
-    except ImportError:
-        return clean_for_json(dict(_empty, error="yfinance non installé"))
-
-    try:
         results = []
         for ticker in WATCHLIST:
             try:
-                tk   = yf.Ticker(ticker)
-                hist = tk.history(period="30d", interval="1d", auto_adjust=True)
+                hist = get_history(ticker, interval="1d", period="30d")
                 if hist.empty or len(hist) < 2:
                     continue
                 last       = hist.iloc[-1]
@@ -325,7 +314,7 @@ def get_postmarket():
         market_close = {}
         for sym, key in [("SPY", "spy"), ("QQQ", "qqq"), ("^VIX", "vix")]:
             try:
-                h = yf.Ticker(sym).history(period="5d", interval="1d", auto_adjust=True)
+                h = get_history(sym, interval="1d", period="5d")
                 if not h.empty and len(h) >= 2:
                     c = float(h["Close"].iloc[-1])
                     p = float(h["Close"].iloc[-2])

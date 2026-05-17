@@ -20,16 +20,10 @@ from scrapers.reddit import (
     is_known_ticker, scan_reddit_direct,
 )
 from analysis.reddit_trend import get_reddit_trends, save_today_snapshot
+from core.data_provider import get_history, get_fast_info
 from analysis.technical_indicators import clean_for_json
 from database.models import get_open_trades
 from dashboard.state import _TEMP_WATCHLIST, _today_alerts, _seen_news_titles
-
-try:
-    import yfinance as _yf
-    _YF_AVAILABLE = True
-except ImportError:
-    _yf = None
-    _YF_AVAILABLE = False
 
 router = APIRouter()
 
@@ -88,27 +82,22 @@ def _next_killzone_str() -> str:
 
 def _scan_alerts() -> list:
     """Scanne la watchlist intraday et génère les alertes."""
-    try:
-        import yfinance as yf
-    except ImportError:
-        return []
-
     alerts = []
     now_str = datetime.now().strftime("%H:%M:%S")
 
     for ticker in WATCHLIST:
         try:
-            tk = yf.Ticker(ticker)
-            fi = tk.fast_info
-            current_price = float(fi.last_price)    if fi.last_price    else None
-            prev_close    = float(fi.previous_close) if fi.previous_close else None
+            fi = get_fast_info(ticker)
+            current_price = float(fi.last_price)    if fi and fi.last_price    else None
+            prev_close    = float(fi.previous_close) if fi and fi.previous_close else None
 
-            hist = tk.history(period="60d", interval="1d", auto_adjust=True)
+            hist = get_history(ticker, interval="1d", period="60d")
             if hist.empty or current_price is None:
                 continue
 
-            sma200_series = tk.history(period="1y", interval="1d", auto_adjust=True)["Close"].rolling(200).mean()
-            sma200 = float(sma200_series.dropna().iloc[-1]) if len(sma200_series.dropna()) > 0 else None
+            hist_1y = get_history(ticker, interval="1d", period="1y")
+            sma200_series = hist_1y["Close"].rolling(200).mean() if not hist_1y.empty else None
+            sma200 = float(sma200_series.dropna().iloc[-1]) if sma200_series is not None and len(sma200_series.dropna()) > 0 else None
 
             avg_vol_20 = float(hist["Volume"].tail(20).mean()) if len(hist) >= 20 else None
             vol_today  = float(hist["Volume"].iloc[-1]) if len(hist) > 0 else None
@@ -379,7 +368,7 @@ def get_reddit_discoveries_endpoint():
                 if d.get("price") is not None:
                     continue
                 try:
-                    hist = _yf.Ticker(d["ticker"]).history(period="5d", interval="1d")
+                    hist = get_history(d["ticker"], interval="1d", period="5d")
                     if hist is not None and len(hist) >= 1:
                         d["price"] = round(float(hist["Close"].iloc[-1]), 2)
                         if len(hist) >= 2:
@@ -532,8 +521,8 @@ def monitor_positions():
                 if not ticker or entry <= 0 or stop <= 0 or entry <= stop:
                     continue
 
-                fi      = _yf.Ticker(ticker).fast_info
-                current = float(fi.last_price) if fi.last_price else None
+                fi      = get_fast_info(ticker)
+                current = float(fi.last_price) if fi and fi.last_price else None
                 if not current or current <= 0:
                     continue
 
