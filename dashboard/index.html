@@ -2475,6 +2475,7 @@ function SmcTab(props) {
   var asianRange     = analysis ? (analysis.asian_range   || {}) : {};
   var sweeps         = analysis ? (analysis.sweeps         || []) : [];
   var validChoch     = analysis ? (analysis.valid_choch    || false) : false;
+  var equalLevels    = analysis ? (analysis.equal_levels    || {})  : {};
   var ud             = unifiedData[selectedTicker] || {};
   var killzoneActive = ud.killzone_active || false;
 
@@ -2891,6 +2892,9 @@ function SmcTab(props) {
                   </div>
                   <div style={{ fontWeight: 700, color: 'var(--text)' }}>${ob.low.toFixed(2)} – ${ob.high.toFixed(2)}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>{ob.date}</div>
+                  {ob.inducement && (
+                    <div style={{ fontSize: 9, color: '#f59e0b', marginTop: 3, fontWeight: 600 }}>⚠ PIÈGE — {ob.inducement_detail}</div>
+                  )}
                 </div>
               );
             })}
@@ -2950,6 +2954,46 @@ function SmcTab(props) {
               </div>
             </div>
           </div>
+
+          {/* ── Section 3b : Equal Highs / Lows (Inducement traps) */}
+          {((equalLevels.eqh || []).length > 0 || (equalLevels.eql || []).length > 0) && (
+            <div className="card mb16" style={{ borderColor: 'rgba(245,158,11,.3)' }}>
+              <div style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600, letterSpacing: 1, marginBottom: 8 }}>⚠ EQUAL HIGHS / LOWS — PIÈGES INSTITUTIONNELS</div>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+                {(equalLevels.eqh || []).length > 0 && (
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <div style={{ fontSize: 10, color: '#ef4444', marginBottom: 4, letterSpacing: 1 }}>🔴 EQH — Equal Highs (BSL)</div>
+                    {(equalLevels.eqh || []).map(function(e, i) {
+                      return (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444', flexShrink: 0 }}></div>
+                          <span style={{ fontWeight: 700 }}>${e.price.toFixed(2)}</span>
+                          <span style={{ fontSize: 9, color: 'var(--muted)' }}>{e.count}× touches</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {(equalLevels.eql || []).length > 0 && (
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <div style={{ fontSize: 10, color: '#10b981', marginBottom: 4, letterSpacing: 1 }}>🟢 EQL — Equal Lows (SSL)</div>
+                    {(equalLevels.eql || []).map(function(e, i) {
+                      return (
+                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 3 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', flexShrink: 0 }}></div>
+                          <span style={{ fontWeight: 700 }}>${e.price.toFixed(2)}</span>
+                          <span style={{ fontSize: 9, color: 'var(--muted)' }}>{e.count}× touches</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 6 }}>
+                Ces niveaux représentent des aimants de liquidité — les stops retail sont concentrés ici. Un OB avec ⚠ PIÈGE ci-dessus est à éviter.
+              </div>
+            </div>
+          )}
 
           {/* ── Section 4 : Discount / Premium */}
           <div className="stitle">DISCOUNT / PREMIUM / OTE</div>
