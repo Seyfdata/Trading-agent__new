@@ -82,6 +82,7 @@ def _detect_equal_levels(df: "pd.DataFrame", threshold: float = 0.0005) -> dict:
     Utilisé pour identifier les pièges institutionnels (Inducement).
     """
     recent = df.tail(63).copy()
+    from analysis.smc.structure import _detect_swings  # lazy
     sh_list, sl_list = _detect_swings(recent, pivot=2)
 
     eqh_levels: list[dict] = []
@@ -163,92 +164,8 @@ def _flag_inducement(obs: list, eq_levels: dict, threshold_pct: float = 0.02) ->
     return obs
 
 
-# ── 1. Structure de marché ────────────────────────────────────────────────────
-
-def _detect_swings(df: "pd.DataFrame", pivot: int = 2) -> tuple[list, list]:
-    """
-    Détecte les swing highs et swing lows sur le DataFrame.
-
-    Un swing high : high[i] > high[i±1] ET high[i] > high[i±2]
-    Un swing low  : low[i]  < low[i±1]  ET low[i]  < low[i±2]
-    """
-    highs = df["High"].values
-    lows  = df["Low"].values
-    dates = df.index.tolist()
-
-    swing_highs: list[dict] = []
-    swing_lows:  list[dict] = []
-
-    for i in range(pivot, len(df) - pivot):
-        is_sh = all(highs[i] > highs[i - k] for k in range(1, pivot + 1)) and \
-                all(highs[i] > highs[i + k] for k in range(1, pivot + 1))
-        if is_sh:
-            swing_highs.append({
-                "price": float(highs[i]),
-                "date":  _fmt_date(dates[i]),
-                "idx":   i,
-            })
-
-        is_sl = all(lows[i] < lows[i - k] for k in range(1, pivot + 1)) and \
-                all(lows[i] < lows[i + k] for k in range(1, pivot + 1))
-        if is_sl:
-            swing_lows.append({
-                "price": float(lows[i]),
-                "date":  _fmt_date(dates[i]),
-                "idx":   i,
-            })
-
-    return swing_highs, swing_lows
-
-
-def _analyze_structure(df: "pd.DataFrame") -> dict:
-    """
-    Détermine le biais HTF (BULL / BEAR / RANGE), le dernier BOS et CHoCH.
-
-    Règles :
-        HH + HL → BULL BOS
-        LH + LL → BEAR BOS
-        HH + LL → CHoCH baissier (retournement après bull)
-        LH + HL → CHoCH haussier (retournement après bear)
-    """
-    swing_highs, swing_lows = _detect_swings(df, pivot=2)
-
-    bias      = "RANGE"
-    last_bos  = None
-    last_choch = None
-
-    if len(swing_highs) >= 2 and len(swing_lows) >= 2:
-        sh_last, sh_prev = swing_highs[-1], swing_highs[-2]
-        sl_last, sl_prev = swing_lows[-1],  swing_lows[-2]
-
-        sh_rising = sh_last["price"] > sh_prev["price"]
-        sl_rising = sl_last["price"] > sl_prev["price"]
-
-        if sh_rising and sl_rising:
-            bias     = "BULL"
-            last_bos = {"direction": "BULL", "price": sh_last["price"], "date": sh_last["date"]}
-
-        elif not sh_rising and not sl_rising:
-            bias     = "BEAR"
-            last_bos = {"direction": "BEAR", "price": sl_last["price"], "date": sl_last["date"]}
-
-        elif sh_rising and not sl_rising:
-            # HH mais LL → retournement baissier probable
-            bias       = "BEAR"
-            last_choch = {"direction": "BEAR", "price": sl_last["price"], "date": sl_last["date"]}
-
-        else:
-            # LH mais HL → retournement haussier probable
-            bias       = "BULL"
-            last_choch = {"direction": "BULL", "price": sh_last["price"], "date": sh_last["date"]}
-
-    return {
-        "bias":        bias,
-        "last_bos":    last_bos,
-        "last_choch":  last_choch,
-        "swing_highs": [{"price": s["price"], "date": s["date"]} for s in swing_highs[-5:]],
-        "swing_lows":  [{"price": s["price"], "date": s["date"]} for s in swing_lows[-5:]],
-    }
+# ── 1. Structure de marché (extrait dans analysis.smc.structure) ────────────────────────────
+# _detect_swings et _analyze_structure : lazy-importés dans les fonctions utilisatrices.
 
 
 # ── 2. Order Blocks ──────────────────────────────────────────────────────────
@@ -494,6 +411,7 @@ def _detect_liquidity(df: "pd.DataFrame", eq_threshold: float = 0.003) -> dict:
     Equal lows  : 2+ swing lows  à moins de 0.3 % l'un de l'autre.
     """
     recent = df.tail(63)
+    from analysis.smc.structure import _detect_swings  # lazy
     sh_list, sl_list = _detect_swings(recent, pivot=2)
 
     sh_prices = [s["price"] for s in sh_list]
@@ -849,6 +767,7 @@ def analyze_ticker(ticker: str, timeframes: list | None = None) -> dict:
         current_price = float(df["Close"].iloc[-1])
 
         # ── Pipeline SMC (ordre de dépendance) ───────────────────────────────
+        from analysis.smc.structure import _analyze_structure  # lazy
         structure   = _analyze_structure(df)
         obs         = _detect_order_blocks(df, current_price)
         liquidity   = _detect_liquidity(df)
