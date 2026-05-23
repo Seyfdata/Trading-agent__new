@@ -440,10 +440,169 @@ def backtest_honest(
         trades_is  = simulate_honest(df_is,  gen(df_is),  capital, risk_pct)
         trades_oos = simulate_honest(df_oos, gen(df_oos), capital, risk_pct)
 
-        return dict(empty, is_trades=trades_is, oos_trades=trades_oos)
+        return dict(empty, is_trades=trades_is, oos_trades=trades_oos, df_oos=df_oos)
 
     except Exception as exc:
-        return dict(empty, error=str(exc))
+        return dict(empty, error=str(exc), df_oos=None)
+
+# ── Buy-and-hold OOS ──────────────────────────────────────────────────────────
+
+def buy_and_hold(df_oos: pd.DataFrame, capital: float = CAPITAL) -> float:
+    """
+    Achète à l'open de la 1re barre OOS, vend au close de la dernière barre OOS.
+    Net d'un aller-retour de frictions identiques à simulate_honest (slippage + commission).
+
+    Représente le coût d'opportunité : rester investi sur toute la période OOS
+    sans aucun timing. C'est l'étalon passif à battre.
+
+    BIAIS DE SURVIE NON CORRIGÉ : même univers de tickers vivants.
+    """
+    if df_oos is None or len(df_oos) < 2:
+        return 0.0
+    entry_raw = float(df_oos.iloc[0]["Open"])
+    exit_raw  = float(df_oos.iloc[-1]["Close"])
+    if entry_raw <= 0:
+        return 0.0
+    entry_fill = _fill_buy(entry_raw)
+    shares     = max(1, int(capital / entry_fill))
+    cost       = shares * entry_fill + _commission(shares)
+    proceeds   = shares * _fill_sell(exit_raw) - _commission(shares)
+    return round((proceeds - cost) / capital * 100, 2)
+
+
+# ── Monte Carlo — test de permutation par entrées aléatoires ──────────────────
+
+def _simulate_random_run(
+    df: pd.DataFrame,
+    entry_bars: list,
+    avg_risk_pct: float,
+    capital: float,
+    risk_pct: float,
+) -> float:
+    """
+    Un run MC : simule les trades depuis des barres d'entrée aléatoires (déjà triées).
+
+    Même moteur de sortie et mêmes frictions que simulate_honest.
+    Une seule position à la fois : entrée ignorée si position déjà ouverte.
+    """
+    n = len(df)
+    total_pnl = 0.0
+    blocked_until = -1
+
+    for ei in entry_bars:
+        if ei <= blocked_until:
+            continue
+        next_i = ei + 1
+        if next_i >= n:
+            continue
+        next_row   = df.iloc[next_i]
+        entry_raw  = float(next_row["Open"])
+        if entry_raw <= 0:
+            continue
+        entry_fill = _fill_buy(entry_raw)
+        rps        = entry_fill * avg_risk_pct
+        if rps <= 0:
+            continue
+        stop_price = entry_fill - rps
+        target_raw = entry_fill + 2.5 * rps
+        shares     = max(1, math.floor(capital * risk_pct / 100.0 / rps))
+        comm_entry = _commission(shares)
+
+        trade_pnl = 0.0
+        closed_at = min(next_i + MAX_HOLD_DAYS, n - 1)
+
+        for j in range(next_i, min(next_i + MAX_HOLD_DAYS + 1, n)):
+            row  = df.iloc[j]
+            hold = j - next_i
+            result = None
+            exit_raw = 0.0
+            if float(row["Low"]) <= stop_price:
+                result, exit_raw = "LOSS", stop_price
+            elif float(row["High"]) >= target_raw:
+                result, exit_raw = "WIN", target_raw
+            elif hold >= MAX_HOLD_DAYS:
+                result, exit_raw = "TIME", float(row["Close"])
+            if result:
+                comm_exit = _commission(shares)
+                trade_pnl = (
+                    (_fill_sell(exit_raw) - entry_fill) * shares
+                    - comm_entry - comm_exit
+                )
+                closed_at = j
+                break
+
+        total_pnl    += trade_pnl
+        blocked_until = closed_at
+
+    return round(total_pnl / capital * 100, 2)
+
+
+def random_entry_montecarlo(
+    df_oos: pd.DataFrame,
+    n_trades: int,
+    real_return_pct: float,
+    avg_risk_pct: float = 0.02,
+    n_runs: int = 500,
+    seed: int = 42,
+    capital: float = CAPITAL,
+    risk_pct: float = RISK_PCT,
+) -> dict:
+    """
+    Test de permutation par entrées aléatoires — méthode Aronson.
+
+    Principe : randomise UNIQUEMENT l'entrée (date). Logique de sortie, stop %,
+    frictions et nombre de trades sont IDENTIQUES à simulate_honest. Isole ainsi
+    la compétence de timing en contrôlant l'exposition et les conditions de marché.
+
+    Paramètres
+    ──────────
+    df_oos         : données OOS (même df que simulate_honest)
+    n_trades       : nombre de trades par run (= trades réels sur l'OOS)
+    real_return_pct: rendement net réel de la stratégie sur l'OOS
+    avg_risk_pct   : risque moyen par trade en % du prix (calculé depuis les trades réels)
+    n_runs         : nombre de runs MC (défaut 500 pour perf acceptable)
+    seed           : graine NumPy pour reproductibilité
+
+    Retourne
+    ────────
+    pvalue     : fraction des runs dont rendement >= rendement réel
+                 p < 0.05 -> stratégie bat le hasard à 95 %
+    percentile : centile du rendement réel dans la distribution MC
+    mean_random, median_random : statistiques de la distribution nulle
+
+    BIAIS DE SURVIE NON CORRIGÉ : même univers de tickers vivants.
+    """
+    empty_mc = {
+        "pvalue": 1.0, "percentile": 0.0,
+        "mean_random": 0.0, "median_random": 0.0, "n_runs": 0,
+    }
+    if n_trades <= 0 or df_oos is None or len(df_oos) < MAX_HOLD_DAYS + 2:
+        return empty_mc
+
+    rng = np.random.default_rng(seed)
+    n   = len(df_oos)
+    candidates = np.arange(0, max(1, n - MAX_HOLD_DAYS - 1))
+
+    if len(candidates) < n_trades:
+        return empty_mc
+
+    dist = np.empty(n_runs)
+    for k in range(n_runs):
+        chosen = np.sort(rng.choice(candidates, size=n_trades, replace=False))
+        dist[k] = _simulate_random_run(
+            df_oos, chosen.tolist(), avg_risk_pct, capital, risk_pct
+        )
+
+    pvalue     = float(np.mean(dist >= real_return_pct))
+    percentile = float(np.mean(dist < real_return_pct) * 100)
+    return {
+        "pvalue":        round(pvalue, 4),
+        "percentile":    round(percentile, 1),
+        "mean_random":   round(float(dist.mean()), 2),
+        "median_random": round(float(np.median(dist)), 2),
+        "n_runs":        n_runs,
+    }
+
 
 # ── Verdict ────────────────────────────────────────────────────────────────────
 
@@ -459,6 +618,10 @@ def _verdict(m_oos: dict) -> str:
 
 # ── run_all ────────────────────────────────────────────────────────────────────
 
+MC_RUNS: int = 500             # nombre de runs Monte Carlo par (ticker, stratégie)
+MIN_TRADES_FOR_BENCH: int = 2  # trades OOS minimum pour calculer les benchmarks
+
+
 def run_all(
     tickers: Optional[list[str]] = None,
     period: str = "10y",
@@ -466,8 +629,14 @@ def run_all(
     risk_pct: float = RISK_PCT,
 ) -> dict:
     """
-    Lance les 3 stratégies sur la watchlist (ou tickers fournis).
-    Affiche un tableau IS vs OOS avec Sharpe, DSR et verdict par stratégie.
+    Lance les 3 stratégies sur la watchlist complète (ou tickers fournis).
+
+    Pour chaque (stratégie, ticker) en OOS :
+      - rendement net de la stratégie
+      - rendement buy-and-hold (coût d'opportunité)
+      - test de permutation MC (p-value : la stratégie bat-elle le hasard ?)
+
+    Affiche un tableau agrégé par stratégie avec verdict global.
     """
     from config.settings import WATCHLIST
 
@@ -478,32 +647,74 @@ def run_all(
     print(
         f"[HonestBT] {len(tickers)} tickers x {len(STRATEGIES)} strats = {n_trials} backtests"
         f" | period={period} | slip={SLIPPAGE_PCT*10000:.0f}bps"
-        f" | comm=max({COMMISSION_MIN}$, {COMMISSION_PER_SHARE}$/sh)"
-        f" | OOS={int((1.0 - OOS_SPLIT) * 100)}%"
+        f" | OOS={int((1.0 - OOS_SPLIT) * 100)}% | MC={MC_RUNS} runs/trial"
     )
 
-    # ── Collecte brute ─────────────────────────────────────────────────────────
+    # ── 1. Backtest honnête pour chaque (stratégie, ticker) ───────────────────
     raw: dict[str, dict[str, dict]] = {s: {} for s in STRATEGIES}
     for strategy in STRATEGIES:
-        print(f"[HonestBT] Stratégie {strategy}...")
+        print(f"[HonestBT] {strategy}...", end=" ", flush=True)
         for ticker in tickers:
             r = backtest_honest(ticker, strategy, period=period, capital=capital, risk_pct=risk_pct)
             if r["error"]:
-                print(f"[HonestBT]   ✗ {ticker}: {r['error']}")
+                print(f"\n[HonestBT]   ! {ticker}: {r['error']}", end="")
             raw[strategy][ticker] = r
+        print("OK")
 
-    # ── Sharpe OOS de tous les trials → variance pour DSR ─────────────────────
-    # Filtre : trials avec < 5 trades OOS exclus (Sharpe non significatif sur peu de trades)
-    MIN_TRADES_FOR_DSR = 5
+    # ── 2. Sharpe OOS cross-trials pour DSR ───────────────────────────────────
+    MIN_TRADES_DSR = 5
     all_sharpes_oos: list[float] = []
     for strategy in STRATEGIES:
         for ticker in tickers:
             r = raw[strategy][ticker]
-            if not r["error"] and len(r["oos_trades"]) >= MIN_TRADES_FOR_DSR:
+            if not r["error"] and len(r["oos_trades"]) >= MIN_TRADES_DSR:
                 sh = _sharpe_annualised([t["pnl_net"] for t in r["oos_trades"]])
                 all_sharpes_oos.append(sh)
 
-    # ── Métriques agrégées par stratégie ──────────────────────────────────────
+    # ── 3. Benchmarks (buy-and-hold + Monte Carlo) par (stratégie, ticker) ────
+    bench: dict[str, dict[str, dict]] = {s: {} for s in STRATEGIES}
+    for strategy in STRATEGIES:
+        for ticker in tickers:
+            r = raw[strategy][ticker]
+            df_oos = r.get("df_oos")
+            oos_trades = r.get("oos_trades", [])
+
+            bh = buy_and_hold(df_oos, capital) if df_oos is not None else 0.0
+            strat_ret = sum(t["pnl_net"] for t in oos_trades) / capital * 100
+
+            mc: dict = {"pvalue": 1.0, "percentile": 0.0,
+                        "mean_random": 0.0, "median_random": 0.0, "n_runs": 0}
+            if len(oos_trades) >= MIN_TRADES_FOR_BENCH and df_oos is not None:
+                risks = [
+                    abs(t["entry"] - t["stop"]) / t["entry"]
+                    for t in oos_trades if t["entry"] > 0 and t["stop"] > 0
+                ]
+                avg_rp = float(np.mean(risks)) if risks else 0.02
+                mc = random_entry_montecarlo(
+                    df_oos=df_oos,
+                    n_trades=len(oos_trades),
+                    real_return_pct=strat_ret,
+                    avg_risk_pct=avg_rp,
+                    n_runs=MC_RUNS,
+                    seed=42,
+                    capital=capital,
+                    risk_pct=risk_pct,
+                )
+            bench[strategy][ticker] = {
+                "strat_return":   round(strat_ret, 2),
+                "bh_return":      bh,
+                "beats_bh":       strat_ret > bh,
+                "mc_pvalue":      mc["pvalue"],
+                "mc_percentile":  mc["percentile"],
+                "mc_mean_random": mc["mean_random"],
+                "verdict_ticker": (
+                    "EDGE PLAUSIBLE"
+                    if mc["pvalue"] < 0.05 and strat_ret > 0
+                    else "PAS DE TIMING"
+                ),
+            }
+
+    # ── 4. Métriques agrégées par stratégie ───────────────────────────────────
     metrics: dict[str, dict] = {}
     for strategy in STRATEGIES:
         all_is: list[dict] = []
@@ -515,7 +726,7 @@ def run_all(
                 all_oos.extend(r["oos_trades"])
 
         agg_cap = capital * len(tickers)
-        m_is = _compute_metrics(all_is, agg_cap)
+        m_is  = _compute_metrics(all_is, agg_cap)
         m_oos = _compute_metrics(
             all_oos, agg_cap,
             all_sharpes_for_dsr=all_sharpes_oos if len(all_sharpes_oos) >= 2 else None,
@@ -523,60 +734,86 @@ def run_all(
         )
         metrics[strategy] = {"is": m_is, "oos": m_oos}
 
-    _print_report(metrics, tickers, period)
-    return {"raw": raw, "metrics": metrics, "n_trials": n_trials}
+    _print_full_report(metrics, bench, tickers, period)
+    return {"raw": raw, "metrics": metrics, "bench": bench, "n_trials": n_trials}
 
 
-def _print_report(metrics: dict, tickers: list[str], period: str) -> None:
-    W = 118
-    hdr = (
-        f"{'Strategie':<22} {'Zone':<4} "
-        f"{'N':>5} {'WR%':>5} {'PF':>5} "
-        f"{'Ret%':>7} {'AvgR':>5} {'DD%':>6} "
-        f"{'Sharpe':>7} {'DSR':>7}  Verdict"
-    )
+def _print_full_report(
+    metrics: dict,
+    bench: dict[str, dict[str, dict]],
+    tickers: list[str],
+    period: str,
+) -> None:
+    """
+    Tableau agrégé par stratégie (OOS uniquement) avec :
+      n_trades, PF_net, Sharpe, DSR, rendement strat moyen, rendement B&H moyen,
+      % tickers qui battent B&H, % tickers p<0.05 (MC), verdict global.
+    """
+    W = 128
     sep  = "=" * W
     line = "-" * W
+
+    hdr = (
+        f"{'Strategie':<22} {'N':>5} {'PF':>5} {'Sharpe':>7} {'DSR':>7}"
+        f" {'Strat%':>7} {'B&H%':>6} {'BtBH%':>6} {'p<.05':>6}  Verdict"
+    )
     print(f"\n{sep}")
     print(
-        f"  HONEST BACKTEST | {len(tickers)} tickers | period={period}"
-        f" | slip={SLIPPAGE_PCT*10000:.0f}bps/cote | commission=IBKR"
+        f"  HONEST BACKTEST (OOS uniquement) | {len(tickers)} tickers"
+        f" | period={period} | slip={SLIPPAGE_PCT*10000:.0f}bps | MC={MC_RUNS} runs"
     )
     print(sep)
     print(hdr)
     print(line)
 
     for strategy in STRATEGIES:
-        m = metrics.get(strategy, {})
-        for zone in ("is", "oos"):
-            mm = m.get(zone, {})
-            pf_s  = f"{mm['profit_factor']:.2f}" if mm.get("profit_factor") else "  N/A"
-            dsr_v = mm.get("deflated_sharpe")
-            dsr_s = f"{dsr_v:+.3f}" if dsr_v is not None else "   N/A"
-            label = strategy if zone == "is" else ""
+        mm = metrics.get(strategy, {}).get("oos", {})
+        b  = bench.get(strategy, {})
 
-            flag = ""
-            if zone == "oos":
-                v = _verdict(mm)
-                icon = "[X]" if v == "MORTE" else "[OK]"
-                flag = f"  {icon} {v}"
+        valid_tickers = [t for t in tickers if not bench.get(strategy, {}).get(t, {}).get("error")]
+        strat_rets  = [b[t]["strat_return"]  for t in tickers if t in b]
+        bh_rets     = [b[t]["bh_return"]     for t in tickers if t in b]
+        beats_bh    = [b[t]["beats_bh"]      for t in tickers if t in b]
+        pvalues     = [b[t]["mc_pvalue"]     for t in tickers if t in b and b[t]["mc_pvalue"] < 1.0]
+        p05_count   = sum(1 for p in pvalues if p < 0.05)
+        p05_frac    = p05_count / len(pvalues) * 100 if pvalues else 0.0
+        beats_frac  = sum(beats_bh) / len(beats_bh) * 100 if beats_bh else 0.0
+        mean_strat  = float(np.mean(strat_rets)) if strat_rets else 0.0
+        mean_bh     = float(np.mean(bh_rets))    if bh_rets    else 0.0
 
-            print(
-                f"{label:<22} {zone.upper():<4} "
-                f"{mm.get('n_trades',0):>5} {mm.get('winrate',0):>4.0f}%"
-                f" {pf_s:>5} {mm.get('total_return_pct',0):>6.1f}%"
-                f" {mm.get('avg_R',0):>5.2f} {mm.get('max_drawdown_pct',0):>5.1f}%"
-                f" {mm.get('sharpe_annualise',0):>7.3f} {dsr_s:>7}{flag}"
-            )
-        print(line)
+        pf_s  = f"{mm['profit_factor']:.2f}" if mm.get("profit_factor") else "  N/A"
+        dsr_v = mm.get("deflated_sharpe")
+        dsr_s = f"{dsr_v:+.3f}" if dsr_v is not None else "   N/A"
 
-    print(f"\n  LEGENDE  DSR > 0 -> edge reel | DSR <= 0 -> bruit / surajustement")
-    print(f"  VERDICT  MORTE si OOS profit_factor < 1.10 OU DSR <= 0, sinon A CREUSER")
-    print(f"  [!] Biais de survie non corrige -- resultats = bornes hautes")
+        # Verdict global stratégie : edge plausible si >= 25% des tickers p<0.05 ET strat > 0
+        global_verdict = (
+            "EDGE PLAUSIBLE"
+            if p05_frac >= 25.0 and mean_strat > 0.0
+            else "PAS D'EDGE"
+        )
+        icon = "[OK]" if global_verdict == "EDGE PLAUSIBLE" else "[X] "
+
+        print(
+            f"{strategy:<22} {mm.get('n_trades',0):>5} {pf_s:>5}"
+            f" {mm.get('sharpe_annualise',0):>7.3f} {dsr_s:>7}"
+            f" {mean_strat:>6.1f}% {mean_bh:>5.1f}% {beats_frac:>5.0f}%"
+            f" {p05_frac:>5.0f}%  {icon} {global_verdict}"
+        )
+
+    print(line)
+    print(f"\n  COLONNES")
+    print(f"  N       : trades OOS (agregat)")
+    print(f"  Strat%  : rendement moyen par ticker (net frictions)")
+    print(f"  B&H%    : rendement buy-and-hold moyen par ticker (net frictions)")
+    print(f"  BtBH%   : % de tickers ou la strategie bat le buy-and-hold")
+    print(f"  p<.05   : % de tickers avec pvalue MC < 0.05 (timing non aleatoire)")
+    print(f"  VERDICT : EDGE PLAUSIBLE si p<.05 >= 25% ET Strat% > 0, sinon PAS D'EDGE")
+    print(f"\n  [!] Biais de survie non corrige -- resultats = bornes hautes")
     print(f"  [!] OOS simple (pas walk-forward) -- WFA prevu iteration 2")
+    print(f"  [!] MC base sur risque % moyen des vrais trades -- approximation du timing pur")
     print(f"{sep}\n")
 
 # ── Point d'entrée ─────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    run_all(["NVDA", "AAPL"], period="10y")
+    run_all(period="10y")
