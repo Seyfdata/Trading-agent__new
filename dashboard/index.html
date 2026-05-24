@@ -3851,7 +3851,7 @@ var _CAPITAL_J  = 10000;
 var _RISK_PCT_J = 0.01;   // 1 %
 var _STATUS_COLOR = { OPEN:'var(--accent)', CLOSED_WIN:'var(--bull)', CLOSED_LOSS:'var(--bear)', CLOSED_BE:'var(--neutral)' };
 var _STATUS_LABEL = { OPEN:'OUVERT', CLOSED_WIN:'GAGNE', CLOSED_LOSS:'PERDU', CLOSED_BE:'BE' };
-var _EMPTY_JFORM  = { ticker:'AAPL', entry_price:'', stop_price:'', target_price:'', setup_type:'MANUAL', direction:'LONG', notes:'' };
+var _EMPTY_JFORM  = { ticker:'AAPL', entry_price:'', stop_price:'', target_price:'', setup_type:'MANUAL', direction:'LONG', notes:'', thesis:'', conviction_pct:50, invalidation:'', tilt:3, process_score:5 };
 
 function _calcJLive(f) {
   var entry  = parseFloat(f.entry_price);
@@ -3872,20 +3872,26 @@ function _calcJLive(f) {
 }
 
 function JournalTab(props) {
-  var posMonitor          = props.posMonitor           || { positions: [], alerts: [], checked_at: null };
-  var inKillzone          = props.inKillzone            || false;
-  var onRefreshPositions  = props.onRefreshPositions    || function() {};
-  var prefillTrade        = props.prefillTrade          || null;
-  var onClearPrefill      = props.onClearPrefill        || function() {};
+  var posMonitor         = props.posMonitor          || { positions: [], alerts: [], checked_at: null };
+  var inKillzone         = props.inKillzone           || false;
+  var onRefreshPositions = props.onRefreshPositions   || function() {};
+  var prefillTrade       = props.prefillTrade         || null;
+  var onClearPrefill     = props.onClearPrefill       || function() {};
 
-  var ts = useState([]); var trades = ts[0]; var setTrades = ts[1];
-  var ls = useState(true); var loading = ls[0]; var setLoading = ls[1];
-  var ss = useState('form'); var section = ss[0]; var setSection = ss[1];
-  var fs = useState(_EMPTY_JFORM); var form = fs[0]; var setForm = fs[1];
+  // === TOUS LES HOOKS EN PREMIER (ordre invariant) ===
+  var ts  = useState([]); var trades  = ts[0];  var setTrades  = ts[1];
+  var ls  = useState(true); var loading = ls[0]; var setLoading = ls[1];
+  var ss  = useState('form'); var section = ss[0]; var setSection = ss[1];
+  var fs  = useState(_EMPTY_JFORM); var form = fs[0]; var setForm = fs[1];
   var fes = useState(null); var formErr = fes[0]; var setFormErr = fes[1];
-  var svs = useState(false); var saving = svs[0]; var setSaving = svs[1];
-  var cs = useState(null); var closing = cs[0]; var setClosing = cs[1];
+  var svs = useState(false); var saving  = svs[0]; var setSaving  = svs[1];
+  var cs  = useState(null); var closing  = cs[0];  var setClosing  = cs[1];
   var cvs = useState(false); var closeSaving = cvs[0]; var setCloseSaving = cvs[1];
+  var gs  = useState(null); var gate     = gs[0];  var setGate     = gs[1];
+  var gls = useState(false); var gateLoad = gls[0]; var setGateLoad = gls[1];
+  var gos = useState(false); var gateOverride = gos[0]; var setGateOverride = gos[1];
+  var ds  = useState(null); var discipline = ds[0]; var setDiscipline = ds[1];
+  var dls = useState(false); var disciplineLoad = dls[0]; var setDisciplineLoad = dls[1];
 
   function loadTrades() {
     setLoading(true);
@@ -3897,7 +3903,6 @@ function JournalTab(props) {
   }
   useEffect(function() { loadTrades(); }, []);
 
-  // Pré-remplir le formulaire depuis l'onglet SMC
   useEffect(function() {
     if (prefillTrade) {
       setForm(function(f) { return Object.assign({}, f, prefillTrade); });
@@ -3906,6 +3911,38 @@ function JournalTab(props) {
     }
   }, [prefillTrade]);
 
+  // Gate pre-trade (debounce 500 ms)
+  useEffect(function() {
+    var entry  = parseFloat(form.entry_price);
+    var stop   = parseFloat(form.stop_price);
+    var target = parseFloat(form.target_price);
+    if (!entry || !stop || !target || isNaN(entry) || isNaN(stop) || isNaN(target)) {
+      setGate(null); return;
+    }
+    var t = setTimeout(function() {
+      setGateLoad(true);
+      fetch('/api/pretrade/evaluate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ capital: _CAPITAL_J, risk_pct: 1.0, entry: entry, stop: stop, target: target, trades_today: 0 }),
+      }).then(function(r) { return r.json(); })
+        .then(function(d) { setGate(d); setGateOverride(false); })
+        .catch(function() { setGate(null); })
+        .finally(function() { setGateLoad(false); });
+    }, 500);
+    return function() { clearTimeout(t); };
+  }, [form.entry_price, form.stop_price, form.target_price]);
+
+  // Rapport discipline (charge quand l'onglet est actif)
+  useEffect(function() {
+    if (section !== 'discipline') return;
+    setDisciplineLoad(true);
+    fetch('/api/discipline/report')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { setDiscipline(d); })
+      .catch(function() { setDiscipline(null); })
+      .finally(function() { setDisciplineLoad(false); });
+  }, [section]);
+
   function setField(k, v) { setForm(function(f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
 
   var live = _calcJLive(form);
@@ -3913,8 +3950,13 @@ function JournalTab(props) {
   function submitTrade() {
     setFormErr(null);
     if (!form.entry_price || !form.stop_price || !form.target_price) { setFormErr('Entry, Stop et Target requis'); return; }
-    if (!live.valid) { setFormErr(live.errors[0] || 'Parametres invalides'); return; }
+    if (!form.thesis)      { setFormErr('These obligatoire — pourquoi ce trade ?'); return; }
+    if (!form.invalidation){ setFormErr('Invalidation obligatoire — quand le trade est-il annule ?'); return; }
+    if (!live.valid && !gateOverride) { setFormErr(live.errors[0] || 'Parametres invalides'); return; }
     setSaving(true);
+    var failedChecks = gate && gate.checks
+      ? gate.checks.filter(function(c) { return c.statut === 'FAIL'; }).map(function(c) { return c.nom; })
+      : [];
     fetch('/api/trades', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -3922,11 +3964,21 @@ function JournalTab(props) {
         stop_price: parseFloat(form.stop_price), target_price: parseFloat(form.target_price),
         shares: live.shares, setup_type: form.setup_type, direction: form.direction,
         notes: form.notes || null,
+        thesis: form.thesis || null,
+        conviction_pct: form.conviction_pct !== '' ? parseInt(form.conviction_pct) : null,
+        invalidation: form.invalidation || null,
+        tilt: form.tilt !== '' ? parseInt(form.tilt) : null,
+        process_score: form.process_score !== '' ? parseInt(form.process_score) : null,
+        gate_verdict: gate ? gate.verdict : null,
+        rules_violated: failedChecks.length > 0 ? JSON.stringify(failedChecks) : null,
+        rr_planned: live.rr !== null ? parseFloat(live.rr.toFixed(3)) : null,
       }),
     }).then(function(r) { return r.json(); })
       .then(function(d) {
         if (d.error) { setFormErr(d.error); return; }
         setForm(_EMPTY_JFORM);
+        setGate(null);
+        setGateOverride(false);
         loadTrades();
         setSection('open');
       })
@@ -3934,14 +3986,23 @@ function JournalTab(props) {
       .finally(function() { setSaving(false); });
   }
 
-  function startClose(t) { setClosing({ id: t.id, ticker: t.ticker, target: t.target_price, price: '', note: '' }); }
+  function startClose(t) {
+    setClosing({ id: t.id, ticker: t.ticker, target: t.target_price,
+      price: '', note: '', stop_violated: false, held_overnight: false, rr_realized: '' });
+  }
   function cancelClose() { setClosing(null); }
   function submitClose(trade_id) {
     if (!closing || !closing.price) return;
     setCloseSaving(true);
     fetch('/api/trades/' + trade_id + '/close', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ close_price: parseFloat(closing.price), notes: closing.note || null }),
+      body: JSON.stringify({
+        close_price: parseFloat(closing.price),
+        notes: closing.note || null,
+        initial_stop_violated: closing.stop_violated ? 1 : 0,
+        held_overnight: closing.held_overnight ? 1 : 0,
+        rr_realized_override: closing.rr_realized !== '' ? parseFloat(closing.rr_realized) : null,
+      }),
     }).then(function(r) { return r.json(); })
       .then(function(d) {
         if (d.error) { alert(d.error); return; }
@@ -3952,23 +4013,28 @@ function JournalTab(props) {
   }
 
   function deleteTrade(id) {
-    if (!confirm('Supprimer ce trade définitivement ?')) return;
+    if (!confirm('Supprimer ce trade ?')) return;
     fetch('/api/trades/' + id, { method: 'DELETE' })
       .then(function() { loadTrades(); })
       .catch(function(e) { alert(String(e)); });
   }
 
-  var openTrades  = trades.filter(function(t) { return t.status === 'OPEN'; });
-  var closed      = trades.filter(function(t) { return t.status !== 'OPEN'; });
-  var wins        = closed.filter(function(t) { return t.status === 'CLOSED_WIN'; });
-  var losses      = closed.filter(function(t) { return t.status === 'CLOSED_LOSS'; });
-  var winRate     = closed.length > 0 ? Math.round(wins.length / closed.length * 100) : null;
-  var totalPnl    = closed.reduce(function(a, t) { return a + (t.pnl_dollars || 0); }, 0);
-  var grossWin    = wins.reduce(function(a, t) { return a + (t.pnl_dollars || 0); }, 0);
-  var grossLoss   = losses.reduce(function(a, t) { return a + Math.abs(t.pnl_dollars || 0); }, 0);
-  var pf          = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : null;
+  var openTrades = trades.filter(function(t) { return t.status === 'OPEN'; });
+  var closed     = trades.filter(function(t) { return t.status !== 'OPEN'; });
+  var wins       = closed.filter(function(t) { return t.status === 'CLOSED_WIN'; });
+  var losses     = closed.filter(function(t) { return t.status === 'CLOSED_LOSS'; });
+  var winRate    = closed.length > 0 ? Math.round(wins.length / closed.length * 100) : null;
+  var totalPnl   = closed.reduce(function(a, t) { return a + (t.pnl_dollars || 0); }, 0);
+  var grossWin   = wins.reduce(function(a, t) { return a + (t.pnl_dollars || 0); }, 0);
+  var grossLoss  = losses.reduce(function(a, t) { return a + Math.abs(t.pnl_dollars || 0); }, 0);
+  var pf         = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : null;
 
-  var inp = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', color: 'var(--text)', fontFamily: 'JetBrains Mono,monospace', fontSize: 12 };
+  var inp = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+    padding: '6px 10px', color: 'var(--text)', fontFamily: 'JetBrains Mono,monospace', fontSize: 12 };
+
+  var gateColor  = gate ? (gate.verdict === 'GO' ? 'var(--bull)' : gate.verdict === 'GO-WARN' ? '#f59e0b' : 'var(--bear)') : 'var(--muted)';
+  var gateBg     = gate ? (gate.verdict === 'GO' ? 'rgba(16,185,129,.1)' : gate.verdict === 'GO-WARN' ? 'rgba(245,158,11,.1)' : 'rgba(239,68,68,.1)') : 'rgba(100,116,139,.06)';
+  var gateBorder = gate ? (gate.verdict === 'GO' ? 'rgba(16,185,129,.3)' : gate.verdict === 'GO-WARN' ? 'rgba(245,158,11,.3)' : 'rgba(239,68,68,.3)') : 'var(--border)';
 
   return (
     <div>
@@ -3993,9 +4059,10 @@ function JournalTab(props) {
       {/* Section tabs */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 16, borderBottom: '1px solid var(--border)', paddingBottom: 10, flexWrap: 'wrap' }}>
         {[
-          { id: 'form',    label: '+ Nouveau trade' },
-          { id: 'open',    label: 'Positions ouvertes (' + openTrades.length + ')' },
-          { id: 'history', label: 'Historique (' + closed.length + ')' },
+          { id: 'form',       label: '+ Nouveau trade' },
+          { id: 'open',       label: 'Positions ouvertes (' + openTrades.length + ')' },
+          { id: 'history',    label: 'Historique (' + closed.length + ')' },
+          { id: 'discipline', label: 'Discipline' },
         ].map(function(s) {
           return (
             <button key={s.id} className={'btn' + (section === s.id ? ' btn-p' : '')} onClick={function() { setSection(s.id); }}>
@@ -4086,7 +4153,6 @@ function JournalTab(props) {
             </div>
           </div>
 
-          {/* Erreurs de validation */}
           {live.errors.length > 0 && (
             <div style={{ marginBottom: 12 }}>
               {live.errors.map(function(err, i) {
@@ -4103,12 +4169,133 @@ function JournalTab(props) {
               style={Object.assign({}, inp, { width: '100%', resize: 'vertical' })} />
           </div>
 
+          {/* Champs disciplinaires pre-trade */}
+          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, marginBottom: 14 }}>
+            <div className="stitle" style={{ fontSize: 12, marginBottom: 12, color: 'var(--accent)' }}>Discipline pre-trade</div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div className="mc" style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>These du trade <span style={{ color: 'var(--bear)' }}>*</span></div>
+              <textarea rows={2} placeholder="Pourquoi ce trade ? OB non teste, BOS structure H4, pullback en zone discount..."
+                value={form.thesis} onChange={function(e) { setField('thesis', e.target.value); }}
+                style={Object.assign({}, inp, { width: '100%', resize: 'vertical' })} />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div className="mc" style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Invalidation <span style={{ color: 'var(--bear)' }}>*</span></div>
+              <textarea rows={1} placeholder="Quand ce trade est-il annule ? Clot. sous stop, CHoCH adverse..."
+                value={form.invalidation} onChange={function(e) { setField('invalidation', e.target.value); }}
+                style={Object.assign({}, inp, { width: '100%', resize: 'none' })} />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div className="mc" style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>Conviction {form.conviction_pct}%</div>
+              <input type="range" min={0} max={100} step={5} value={form.conviction_pct}
+                onChange={function(e) { setField('conviction_pct', parseInt(e.target.value)); }}
+                style={{ width: '100%', accentColor: 'var(--accent)' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: 'var(--muted)' }}>
+                <span>0%</span><span>Incertain</span><span>Confiant</span><span>100%</span>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div className="mc" style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>Tilt emotionnel (1=calme, 5=tilt)</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[1,2,3,4,5].map(function(n) {
+                  var col = n <= 2 ? 'var(--bull)' : n === 3 ? '#f59e0b' : 'var(--bear)';
+                  return (
+                    <button key={n}
+                      style={{ flex: 1, justifyContent: 'center', fontWeight: form.tilt === n ? 700 : 400,
+                        background: form.tilt === n ? col : 'transparent',
+                        color: form.tilt === n ? '#fff' : col,
+                        borderColor: col, fontSize: 14, padding: '4px 0',
+                        border: '1px solid', borderRadius: 4, cursor: 'pointer' }}
+                      onClick={function() { setField('tilt', n); }}>
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: 6, fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>
+                {['Calme','Leger','Moyen','Eleve','Critique'].map(function(l, i) {
+                  return <span key={i} style={{ flex: 1, textAlign: 'center' }}>{l}</span>;
+                })}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 4 }}>
+              <div className="mc" style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>Score de processus (1-10)</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {[1,2,3,4,5,6,7,8,9,10].map(function(n) {
+                  var col = n >= 7 ? 'var(--bull)' : n >= 5 ? '#f59e0b' : 'var(--bear)';
+                  return (
+                    <button key={n}
+                      style={{ flex: '1 1 28px', minWidth: 28, justifyContent: 'center', fontWeight: form.process_score === n ? 700 : 400,
+                        background: form.process_score === n ? col : 'transparent',
+                        color: form.process_score === n ? '#fff' : col,
+                        borderColor: col, fontSize: 12, padding: '4px 2px',
+                        border: '1px solid', borderRadius: 4, cursor: 'pointer' }}
+                      onClick={function() { setField('process_score', n); }}>
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--muted)', marginTop: 4 }}>
+                1-4 Bas · 5-6 Moyen · 7-10 Haut — score gele avant execution (anti-resulting Kahneman)
+              </div>
+            </div>
+          </div>
+
+          {/* Gate pre-trade bandeau */}
+          {(gate || gateLoad) && (
+            <div style={{ background: gateBg, border: '1px solid ' + gateBorder, borderRadius: 8, padding: '10px 14px', marginBottom: 14 }}>
+              {gateLoad ? (
+                <div style={{ fontSize: 12, color: 'var(--muted)' }}>Evaluation gate...</div>
+              ) : gate && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 15, color: gateColor }}>
+                      {gate.verdict}
+                    </span>
+                    {gate.sizing && (
+                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                        {gate.sizing.shares} shares · R:R {gate.sizing.rr}R · Heat {gate.sizing.risk_exposure_pct}%
+                      </span>
+                    )}
+                    {gate.verdict === 'NO-GO' && !gateOverride && (
+                      <button className="btn" style={{ marginLeft: 'auto', fontSize: 10, color: '#f59e0b', borderColor: 'rgba(245,158,11,.4)' }}
+                        onClick={function() { setGateOverride(true); }}>
+                        Override (assume risque)
+                      </button>
+                    )}
+                    {gateOverride && (
+                      <span style={{ marginLeft: 'auto', fontSize: 10, color: '#f59e0b', fontWeight: 700 }}>Override actif</span>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {gate.checks && gate.checks.map(function(c) {
+                      var bc = c.statut === 'PASS' ? 'rgba(16,185,129,.2)' : c.statut === 'FAIL' ? 'rgba(239,68,68,.2)' : 'rgba(245,158,11,.2)';
+                      var tc = c.statut === 'PASS' ? 'var(--bull)' : c.statut === 'FAIL' ? 'var(--bear)' : '#f59e0b';
+                      return (
+                        <div key={c.nom} title={c.detail}
+                          style={{ background: bc, borderRadius: 4, padding: '2px 8px', fontSize: 10, color: tc, cursor: 'default' }}>
+                          {c.nom} {c.statut === 'PASS' ? '✓' : c.statut === 'FAIL' ? '✗' : '!'}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {formErr && <div style={{ color: 'var(--bear)', fontSize: 12, marginBottom: 10 }}>! {formErr}</div>}
-          <button className="btn btn-p" onClick={submitTrade} disabled={saving || !live.valid}>
-            {saving ? 'Enregistrement...' : 'Enregistrer le trade'}
+          <button className="btn btn-p" onClick={submitTrade}
+            disabled={saving || (!live.valid && !gateOverride) || !form.thesis || !form.invalidation}>
+            {saving ? 'Enregistrement...' : gateOverride ? 'Enregistrer (override gate)' : 'Enregistrer le trade'}
           </button>
-          {!live.valid && form.entry_price && form.stop_price && form.target_price && (
-            <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 12 }}>Corrigez les erreurs ci-dessus pour activer.</span>
+          {gate && gate.verdict === 'NO-GO' && !gateOverride && (
+            <span style={{ fontSize: 11, color: 'var(--bear)', marginLeft: 12 }}>Gate NO-GO — cliquez Override pour forcer.</span>
           )}
         </div>
       )}
@@ -4116,16 +4303,15 @@ function JournalTab(props) {
       {/* ── Section : Positions ouvertes ────────────────────────── */}
       {section === 'open' && (
         <div>
-          {/* Barre de vérification positions */}
           <div className="rowb mb12" style={{ fontSize: 11, color: 'var(--muted)' }}>
             <span>
               {posMonitor.checked_at
-                ? 'Dernière vérification : ' + posMonitor.checked_at
-                : 'PnL temps réel disponible pendant la killzone'}
+                ? 'Derniere verification : ' + posMonitor.checked_at
+                : 'PnL temps reel disponible pendant la killzone'}
             </span>
             {!inKillzone && (
               <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={onRefreshPositions}>
-                📊 Vérifier maintenant
+                Verifier maintenant
               </button>
             )}
             {inKillzone && posMonitor.checked_at && (
@@ -4146,34 +4332,30 @@ function JournalTab(props) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 12 }}>
               {openTrades.map(function(t) {
                 var isClosing = closing && closing.id === t.id;
-                // Recherche des données de position temps réel
                 var pm = null;
                 if (posMonitor && posMonitor.positions) {
                   for (var pi = 0; pi < posMonitor.positions.length; pi++) {
                     if (posMonitor.positions[pi].id === t.id) { pm = posMonitor.positions[pi]; break; }
                   }
                 }
-                // Calcul barre de progression
                 var barRange = (t.target_price && t.stop_price) ? t.target_price - t.stop_price : 0;
-                var entryPct  = barRange > 0 ? Math.max(0, Math.min(100, (t.entry_price - t.stop_price) / barRange * 100)) : 50;
-                var currPct   = (pm && barRange > 0) ? Math.max(0, Math.min(100, (pm.current_price - t.stop_price) / barRange * 100)) : null;
-                var barGrad   = 'linear-gradient(to right, #ef4444 0%, #ef4444 ' + Math.max(0, entryPct - 4) + '%, #334155 ' + entryPct + '%, #10b981 100%)';
+                var entryPct = barRange > 0 ? Math.max(0, Math.min(100, (t.entry_price - t.stop_price) / barRange * 100)) : 50;
+                var currPct  = (pm && barRange > 0) ? Math.max(0, Math.min(100, (pm.current_price - t.stop_price) / barRange * 100)) : null;
+                var barGrad  = 'linear-gradient(to right, #ef4444 0%, #ef4444 ' + Math.max(0, entryPct - 4) + '%, #334155 ' + entryPct + '%, #10b981 100%)';
                 var markerClr = pm ? (pm.current_price >= t.entry_price ? '#10b981' : '#ef4444') : '#94a3b8';
                 return (
                   <div key={t.id} className="card">
-                    {/* Bandeau status_alert (clignotant si critique) */}
                     {pm && pm.status_alert && (
                       <div className={'pos-alert ' + (pm.status_alert === 'TARGET_HIT' ? 'pos-alert-crit-win' : pm.status_alert === 'STOP_HIT' ? 'pos-alert-crit' : pm.status_alert === 'NEAR_TARGET' ? 'pos-alert-warn-win' : 'pos-alert-warn')}
                         style={{ marginBottom: 10 }}>
-                        {pm.status_alert === 'TARGET_HIT'   && '🎯 TARGET ATTEINT — ' + pm.current_price.toFixed(2)}
-                        {pm.status_alert === 'STOP_HIT'     && '🛑 STOP TOUCHÉ — ' + pm.current_price.toFixed(2)}
-                        {pm.status_alert === 'NEAR_TARGET'  && '⚠️ Proche target — ' + pm.distance_target_pct + '% restant'}
-                        {pm.status_alert === 'NEAR_STOP'    && '⚠️ Proche stop — ' + pm.distance_stop_pct + '% marge'}
-                        {pm.status_alert === 'BREAKEVEN'    && '↔️ Au breakeven'}
+                        {pm.status_alert === 'TARGET_HIT'  && 'TARGET ATTEINT — ' + pm.current_price.toFixed(2)}
+                        {pm.status_alert === 'STOP_HIT'    && 'STOP TOUCHE — ' + pm.current_price.toFixed(2)}
+                        {pm.status_alert === 'NEAR_TARGET' && 'Proche target — ' + pm.distance_target_pct + '% restant'}
+                        {pm.status_alert === 'NEAR_STOP'   && 'Proche stop — ' + pm.distance_stop_pct + '% marge'}
+                        {pm.status_alert === 'BREAKEVEN'   && 'Au breakeven'}
                       </div>
                     )}
 
-                    {/* Card header */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                       <div>
                         <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent)' }}>{t.ticker}</span>
@@ -4183,7 +4365,6 @@ function JournalTab(props) {
                       <div className="mc" style={{ fontSize: 10, color: 'var(--muted)' }}>{(t.date_open || '').slice(0, 10)}</div>
                     </div>
 
-                    {/* PnL temps réel */}
                     {pm && (
                       <div style={{ background: 'rgba(30,41,59,.4)', borderRadius: 6, padding: '8px 10px', marginBottom: 10 }}>
                         <div className="rowb" style={{ marginBottom: 6 }}>
@@ -4203,7 +4384,6 @@ function JournalTab(props) {
                             </div>
                           </div>
                         </div>
-                        {/* Barre stop↔target */}
                         {barRange > 0 && currPct !== null && (
                           <div>
                             <div className="pos-bar" style={{ background: barGrad }}>
@@ -4219,7 +4399,6 @@ function JournalTab(props) {
                       </div>
                     )}
 
-                    {/* Price grid (toujours visible) */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0, marginBottom: 10, border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden' }}>
                       {[
                         { label: 'ENTRY',  val: t.entry_price,  color: 'var(--text)' },
@@ -4235,7 +4414,6 @@ function JournalTab(props) {
                       })}
                     </div>
 
-                    {/* Metrics */}
                     <div style={{ display: 'flex', gap: 14, fontSize: 11, color: 'var(--muted)', marginBottom: 10, flexWrap: 'wrap' }}>
                       <span>Shares: <b style={{ color: 'var(--text)' }}>{t.shares}</b></span>
                       <span>Risque: <b style={{ color: 'var(--text)' }}>{t.risk_dollars != null ? t.risk_dollars.toFixed(0) + ' $' : '—'}</b></span>
@@ -4248,7 +4426,6 @@ function JournalTab(props) {
                       </div>
                     )}
 
-                    {/* Clôture inline */}
                     {isClosing ? (
                       <div style={{ background: 'rgba(16,185,129,.06)', border: '1px solid rgba(16,185,129,.2)', borderRadius: 6, padding: 10 }}>
                         <div className="mc" style={{ fontSize: 10, color: 'var(--bull)', marginBottom: 6 }}>Prix de cloture</div>
@@ -4260,6 +4437,35 @@ function JournalTab(props) {
                           value={closing.note}
                           onChange={function(e) { setClosing(Object.assign({}, closing, { note: e.target.value })); }}
                           style={Object.assign({}, inp, { width: '100%', resize: 'none', marginBottom: 8 })} />
+
+                        {/* Post-trade discipline */}
+                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginBottom: 8 }}>
+                          <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 6 }}>Discipline post-trade</div>
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                            <button style={{ flex: '1 1 120px', padding: '5px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                              background: closing.stop_violated ? 'rgba(239,68,68,.2)' : 'transparent',
+                              color: closing.stop_violated ? 'var(--bear)' : 'var(--muted)',
+                              border: '1px solid ' + (closing.stop_violated ? 'rgba(239,68,68,.5)' : 'var(--border)') }}
+                              onClick={function() { setClosing(Object.assign({}, closing, { stop_violated: !closing.stop_violated })); }}>
+                              Stop viole {closing.stop_violated ? 'OUI' : 'non'}
+                            </button>
+                            <button style={{ flex: '1 1 120px', padding: '5px 10px', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700,
+                              background: closing.held_overnight ? 'rgba(245,158,11,.2)' : 'transparent',
+                              color: closing.held_overnight ? '#f59e0b' : 'var(--muted)',
+                              border: '1px solid ' + (closing.held_overnight ? 'rgba(245,158,11,.5)' : 'var(--border)') }}
+                              onClick={function() { setClosing(Object.assign({}, closing, { held_overnight: !closing.held_overnight })); }}>
+                              Overnight {closing.held_overnight ? 'OUI' : 'non'}
+                            </button>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 4 }}>R:R realise (optionnel, override auto)</div>
+                            <input type="number" step="0.01" placeholder="ex. -0.5 ou 2.3"
+                              value={closing.rr_realized}
+                              onChange={function(e) { setClosing(Object.assign({}, closing, { rr_realized: e.target.value })); }}
+                              style={Object.assign({}, inp, { width: '100%' })} />
+                          </div>
+                        </div>
+
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button className="btn btn-p" style={{ fontSize: 11 }} onClick={function() { submitClose(t.id); }} disabled={closeSaving || !closing.price}>
                             {closeSaving ? '...' : 'Confirmer'}
@@ -4290,7 +4496,6 @@ function JournalTab(props) {
       {/* ── Section : Historique ──────────────────────────────────── */}
       {section === 'history' && (
         <div>
-          {/* Mini stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 10, marginBottom: 16 }}>
             {[
               { label: 'Win Rate',      val: winRate !== null ? winRate + '%' : '—', color: winRate !== null && winRate >= 50 ? 'var(--bull)' : 'var(--bear)' },
@@ -4357,6 +4562,97 @@ function JournalTab(props) {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Section : Discipline ──────────────────────────────────── */}
+      {section === 'discipline' && (
+        <div>
+          {disciplineLoad && (
+            <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>Chargement du rapport...</div>
+          )}
+          {!disciplineLoad && discipline && (
+            <div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 10, marginBottom: 16 }}>
+                {[
+                  { label: 'Trades analyses', val: discipline.n_trades, color: 'var(--accent)' },
+                  { label: 'Taux override',   val: discipline.override_rate != null ? (discipline.override_rate * 100).toFixed(0) + '%' : '—',
+                    color: discipline.override_rate > 0.3 ? 'var(--bear)' : 'var(--bull)' },
+                  { label: 'R:R overrides',   val: discipline.avg_r_override != null ? discipline.avg_r_override.toFixed(2) + 'R' : '—',
+                    color: discipline.avg_r_override != null && discipline.avg_r_override < 0 ? 'var(--bear)' : 'var(--bull)' },
+                  { label: 'R:R conformes',   val: discipline.avg_r_conforming != null ? discipline.avg_r_conforming.toFixed(2) + 'R' : '—',
+                    color: discipline.avg_r_conforming != null && discipline.avg_r_conforming < 0 ? 'var(--bear)' : 'var(--bull)' },
+                  { label: 'Stops violes',    val: discipline.stop_violation_rate != null ? (discipline.stop_violation_rate * 100).toFixed(0) + '%' : '—',
+                    color: discipline.stop_violation_rate > 0.2 ? 'var(--bear)' : 'var(--neutral)' },
+                  { label: 'Tenu overnight',  val: discipline.overnight_rate != null ? (discipline.overnight_rate * 100).toFixed(0) + '%' : '—',
+                    color: discipline.overnight_rate > 0.2 ? '#f59e0b' : 'var(--neutral)' },
+                ].map(function(s) {
+                  return (
+                    <div key={s.label} className="card card-sm">
+                      <div className="mc" style={{ fontSize: 10, color: 'var(--muted)', marginBottom: 3 }}>{s.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.val}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {discipline.tilt_by_level && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                  <div className="stitle" style={{ fontSize: 12, marginBottom: 10 }}>R:R moyen par niveau de tilt</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {[1,2,3,4,5].map(function(n) {
+                      var d = discipline.tilt_by_level[n] || { n: 0, avg_r: null };
+                      var col = n <= 2 ? 'var(--bull)' : n === 3 ? '#f59e0b' : 'var(--bear)';
+                      return (
+                        <div key={n} className="card card-sm" style={{ flex: 1, textAlign: 'center' }}>
+                          <div style={{ fontWeight: 700, fontSize: 16, color: col }}>{n}</div>
+                          <div className="mc" style={{ fontSize: 9, color: 'var(--muted)' }}>{d.n} trades</div>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: d.avg_r != null && d.avg_r >= 0 ? 'var(--bull)' : 'var(--bear)' }}>
+                            {d.avg_r != null ? (d.avg_r >= 0 ? '+' : '') + d.avg_r.toFixed(2) + 'R' : '—'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {discipline.resulting_matrix && (
+                <div className="card">
+                  <div className="stitle" style={{ fontSize: 12, marginBottom: 4 }}>Matrice resulting (Kahneman / Duke)</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
+                    Anti-resulting : le score processus est gele avant execution — le resultat ne le modifie pas.
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {[
+                      { key: 'process_haut_gagnant', label: 'Processus HAUT + Gagne', desc: 'Excellence confirmee',             color: 'var(--bull)', bg: 'rgba(16,185,129,.08)', warn: false },
+                      { key: 'process_haut_perdant', label: 'Processus HAUT + Perdu', desc: 'Bonne decision, mauvais resultat — OK', color: 'var(--neutral)', bg: 'rgba(100,116,139,.08)', warn: false },
+                      { key: 'process_bas_gagnant',  label: 'Processus BAS + Gagne',  desc: 'Chance dangereuse — a corriger !',      color: '#f59e0b', bg: 'rgba(245,158,11,.1)', warnDyn: true },
+                      { key: 'process_bas_perdant',  label: 'Processus BAS + Perdu',  desc: 'Erreur confirmee — apprendre',           color: 'var(--bear)', bg: 'rgba(239,68,68,.08)', warn: false },
+                    ].map(function(q) {
+                      var v = discipline.resulting_matrix[q.key] || 0;
+                      var isWarn = q.warnDyn ? v > 0 : q.warn;
+                      return (
+                        <div key={q.key} style={{ background: q.bg, borderRadius: 8, padding: '12px 14px',
+                          border: isWarn ? '2px solid #f59e0b' : '1px solid var(--border)' }}>
+                          <div style={{ fontWeight: 700, fontSize: 22, color: q.color, marginBottom: 4 }}>{v}</div>
+                          <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 2 }}>{q.label}</div>
+                          <div style={{ fontSize: 10, color: 'var(--muted)' }}>{q.desc}</div>
+                          {isWarn && <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 4, fontWeight: 700 }}>Fortune du debutant !</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {!disciplineLoad && !discipline && (
+            <div className="card" style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>
+              Aucune donnee disponible.
+              <div style={{ fontSize: 11, marginTop: 8 }}>Enregistrez des trades avec les champs de discipline pour voir le rapport.</div>
             </div>
           )}
         </div>
