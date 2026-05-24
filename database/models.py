@@ -1,4 +1,4 @@
-"""
+﻿"""
 Base de données SQLite — historique des scores et du contexte marché.
 Fichier DB : database/trading_agent.db
 """
@@ -244,7 +244,7 @@ def save_trade(trade_dict: dict, db_path: Path = DB_PATH) -> int:
 
     # Champs gate
     gate_verdict    = trade_dict.get("gate_verdict")
-    gate_overridden = 1 if gate_verdict and gate_verdict != "GO" else 0
+    gate_overridden = trade_dict.get("gate_overridden", 1 if gate_verdict == "NO-GO" else 0)
     raw_violated    = trade_dict.get("rules_violated", [])
     if isinstance(raw_violated, list):
         rules_violated = json.dumps(raw_violated) if raw_violated else None

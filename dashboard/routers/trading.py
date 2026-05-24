@@ -1,4 +1,4 @@
-"""
+﻿"""
 Router: journal de trading et performance.
 Couvre: trades CRUD (post/get/put/delete), performance, performance/advanced.
 """
@@ -109,7 +109,7 @@ async def close_trade_endpoint(trade_id: int, request: Request):
         body = await request.json()
         if "close_price" not in body:
             return clean_for_json({"error": "close_price requis"})
-        rr_ov = body.get("rr_realized")
+        rr_ov = body.get("rr_realized") or body.get("rr_realized_override")
         trade = close_trade(
             trade_id,
             float(body["close_price"]),

@@ -3970,6 +3970,7 @@ function JournalTab(props) {
         tilt: form.tilt !== '' ? parseInt(form.tilt) : null,
         process_score: form.process_score !== '' ? parseInt(form.process_score) : null,
         gate_verdict: gate ? gate.verdict : null,
+        gate_overridden: gateOverride ? 1 : 0,
         rules_violated: failedChecks.length > 0 ? JSON.stringify(failedChecks) : null,
         rr_planned: live.rr !== null ? parseFloat(live.rr.toFixed(3)) : null,
       }),
@@ -4001,7 +4002,7 @@ function JournalTab(props) {
         notes: closing.note || null,
         initial_stop_violated: closing.stop_violated ? 1 : 0,
         held_overnight: closing.held_overnight ? 1 : 0,
-        rr_realized_override: closing.rr_realized !== '' ? parseFloat(closing.rr_realized) : null,
+        rr_realized: closing.rr_realized !== '' ? parseFloat(closing.rr_realized) : null,
       }),
     }).then(function(r) { return r.json(); })
       .then(function(d) {
