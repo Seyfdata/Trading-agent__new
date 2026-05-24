@@ -313,6 +313,37 @@ def get_setups(extra_tickers: str = ""):
         })
 
 
+@app.post("/api/risk/size")
+def risk_size(payload: dict):
+    """Valide et calcule la taille d'une position LONG via le moteur de risque autoritaire.
+
+    Body JSON attendu :
+        capital               float  — capital total du compte (USD)
+        risk_pct              float  — risque en % du capital (ex. 1.0)
+        entry                 float  — prix d'entrée
+        stop                  float  — stop-loss (< entry)
+        target                float  — cible (> entry)
+        open_positions_value  float  — valeur positions ouvertes (défaut 0)
+        trades_today          int    — trades déjà pris aujourd'hui (défaut 0)
+
+    Retour : { verdict, violations, shares, risk_amount, rr, exposure_pct, position_value }
+    """
+    try:
+        from analysis.risk_engine import validate_and_size
+        result = validate_and_size(
+            capital=float(payload.get("capital", 0)),
+            risk_pct=float(payload.get("risk_pct", 1.0)),
+            entry=float(payload.get("entry", 0)),
+            stop=float(payload.get("stop", 0)),
+            target=float(payload.get("target", 0)),
+            open_positions_value=float(payload.get("open_positions_value", 0.0)),
+            trades_today=int(payload.get("trades_today", 0)),
+        )
+        return result
+    except Exception as e:
+        return clean_for_json({"error": str(e), "verdict": "NO-GO", "violations": [str(e)]})
+
+
 # ── Test pages ────────────────────────────────────────────────────────────────
 
 @app.get("/journal-test", response_class=HTMLResponse)
