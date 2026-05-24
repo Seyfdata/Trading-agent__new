@@ -17,21 +17,44 @@ router = APIRouter()
 
 @router.post("/trades")
 async def create_trade(request: Request):
-    """Crée un nouveau trade OPEN.
-    Body JSON requis : ticker, entry_price, stop_price, target_price, shares.
+    """Cree un nouveau trade OPEN avec champs disciplinaires optionnels.
+
+    Requis : ticker, entry_price, stop_price, target_price, shares.
     Optionnels : setup_type, direction, notes, score_at_entry, market_regime.
+    Pre-trade : thesis, conviction_pct (0-100), invalidation,
+                tilt (1-5), process_score (1-10).
+    Gate : gate_verdict, rules_violated.
+    Retourne 400 si conviction_pct/tilt/process_score hors bornes.
     """
     try:
         body = await request.json()
         required = ("ticker", "entry_price", "stop_price", "target_price", "shares")
         missing = [f for f in required if f not in body]
         if missing:
-            return {"error": f"Champs manquants : {', '.join(missing)}"}
+            return clean_for_json({"error": f"Champs manquants : {', '.join(missing)}"})
+
+        violations = []
+        cv = body.get("conviction_pct")
+        if cv is not None and not (0 <= int(cv) <= 100):
+            violations.append(f"conviction_pct={cv} hors [0, 100]")
+        tl = body.get("tilt")
+        if tl is not None and not (1 <= int(tl) <= 5):
+            violations.append(f"tilt={tl} hors [1, 5]")
+        ps = body.get("process_score")
+        if ps is not None and not (1 <= int(ps) <= 10):
+            violations.append(f"process_score={ps} hors [1, 10]")
+        if violations:
+            return clean_for_json({"error": "Bornes invalides", "violations": violations})
+
+        print(f"[Journal] Nouveau trade: {body.get(chr(39)+"ticker"+chr(39))} "
+              f"gate={body.get(chr(39)+"gate_verdict"+chr(39))} conviction={cv} tilt={tl} process={ps}")
+
         trade_id = save_trade(body)
         trade = get_trade_by_id(trade_id)
         return clean_for_json({"id": trade_id, "trade": trade})
     except Exception as e:
-        return {"error": str(e)}
+        return clean_for_json({"error": str(e)})
+
 
 
 @router.get("/trades")
@@ -76,20 +99,30 @@ def get_trade(trade_id: int):
 
 @router.put("/trades/{trade_id}/close")
 async def close_trade_endpoint(trade_id: int, request: Request):
-    """Clôture un trade et calcule automatiquement PnL, R:R réalisé et statut.
-    Body JSON requis : close_price.
-    Optionnel : notes.
+    """Cloture un trade.
+
+    Requis : close_price.
+    Optionnels : notes, initial_stop_violated (0/1), held_overnight (0/1),
+                 rr_realized (float, override calcul auto).
     """
     try:
         body = await request.json()
         if "close_price" not in body:
-            return {"error": "close_price requis"}
-        trade = close_trade(trade_id, float(body["close_price"]), body.get("notes"))
+            return clean_for_json({"error": "close_price requis"})
+        rr_ov = body.get("rr_realized")
+        trade = close_trade(
+            trade_id,
+            float(body["close_price"]),
+            notes=body.get("notes"),
+            initial_stop_violated=body.get("initial_stop_violated"),
+            rr_realized_override=float(rr_ov) if rr_ov is not None else None,
+            held_overnight=body.get("held_overnight"),
+        )
         if trade is None:
-            return {"error": f"Trade {trade_id} introuvable"}
+            return clean_for_json({"error": f"Trade {trade_id} introuvable"})
         return clean_for_json({"trade": trade})
     except Exception as e:
-        return {"error": str(e)}
+        return clean_for_json({"error": str(e)})
 
 
 @router.delete("/trades/{trade_id}")
@@ -102,6 +135,99 @@ def delete_trade_endpoint(trade_id: int):
         return {"deleted": True, "id": trade_id}
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/discipline/report")
+def get_discipline_report():
+    """Rapport disciplinaire (Kahneman/Duke) sur les trades clos.
+
+    Metriques : override_rate, avg_R override vs conforming, tilt par niveau,
+    stop_violation_rate, avg_rr_ratio (disposition effect),
+    resulting_matrix (process x issue), overnight_rate.
+    """
+    _empty = {
+        "n_trades": 0, "message": "Aucun trade clos.",
+        "override_rate": None, "avg_r_override": None, "avg_r_conforming": None,
+        "avg_tilt": None, "tilt_by_level": {},
+        "stop_violation_rate": None, "avg_rr_ratio": None,
+        "resulting_matrix": {
+            "process_haut_gagnant": 0, "process_haut_perdant": 0,
+            "process_bas_gagnant": 0,  "process_bas_perdant": 0,
+        },
+        "overnight_rate": None,
+    }
+    try:
+        import sqlite3 as _sq
+        with _sq.connect(DB_PATH) as conn:
+            conn.row_factory = _sq.Row
+            rows = conn.execute(
+                "SELECT * FROM trades WHERE status != 'OPEN' ORDER BY date_close ASC"
+            ).fetchall()
+        trades = [dict(r) for r in rows]
+        if not trades:
+            return clean_for_json(_empty)
+
+        n = len(trades)
+
+        def _avg_r(subset):
+            vals = [t["rr_realized"] for t in subset if t.get("rr_realized") is not None]
+            return round(sum(vals) / len(vals), 3) if vals else None
+
+        overridden = [t for t in trades if t.get("gate_overridden")]
+        conforming = [t for t in trades if not t.get("gate_overridden")]
+        override_rate = round(len(overridden) / n * 100, 1)
+
+        tilt_vals = [t.get("tilt") for t in trades if t.get("tilt") is not None]
+        avg_tilt = round(sum(tilt_vals) / len(tilt_vals), 2) if tilt_vals else None
+        tilt_by_level = {}
+        for lvl in range(1, 6):
+            sub = [t for t in trades if t.get("tilt") == lvl]
+            tilt_by_level[str(lvl)] = {"n": len(sub), "avg_r": _avg_r(sub)}
+
+        stop_violated = [t for t in trades if t.get("initial_stop_violated")]
+        stop_violation_rate = round(len(stop_violated) / n * 100, 1)
+
+        ratio_vals = [
+            t["rr_realized"] / t["rr_planned"]
+            for t in trades
+            if t.get("rr_realized") is not None
+            and t.get("rr_planned") and t["rr_planned"] > 0
+        ]
+        avg_rr_ratio = round(sum(ratio_vals) / len(ratio_vals), 3) if ratio_vals else None
+
+        PROCESS_SEUIL = 6
+        matrix = {"process_haut_gagnant": 0, "process_haut_perdant": 0,
+                  "process_bas_gagnant": 0,  "process_bas_perdant": 0}
+        for t in trades:
+            ps = t.get("process_score")
+            if ps is None:
+                continue
+            haut = ps >= PROCESS_SEUIL
+            win  = t["status"] == "CLOSED_WIN"
+            if haut and win:       matrix["process_haut_gagnant"] += 1
+            elif haut and not win: matrix["process_haut_perdant"] += 1
+            elif not haut and win: matrix["process_bas_gagnant"]  += 1
+            else:                  matrix["process_bas_perdant"]  += 1
+
+        overnight = [t for t in trades if t.get("held_overnight")]
+        overnight_rate = round(len(overnight) / n * 100, 1)
+
+        print(f"[Journal] discipline/report: {n} trades | override={override_rate}% | stop_viol={stop_violation_rate}%")
+
+        return clean_for_json({
+            "n_trades":            n,
+            "override_rate":       override_rate,
+            "avg_r_override":      _avg_r(overridden),
+            "avg_r_conforming":    _avg_r(conforming),
+            "avg_tilt":            avg_tilt,
+            "tilt_by_level":       tilt_by_level,
+            "stop_violation_rate": stop_violation_rate,
+            "avg_rr_ratio":        avg_rr_ratio,
+            "resulting_matrix":    matrix,
+            "overnight_rate":      overnight_rate,
+        })
+    except Exception as e:
+        return clean_for_json(dict(_empty, error=str(e)))
 
 
 @router.get("/performance")

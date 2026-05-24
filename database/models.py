@@ -3,6 +3,7 @@ Base de données SQLite — historique des scores et du contexte marché.
 Fichier DB : database/trading_agent.db
 """
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,6 +12,37 @@ DB_PATH = Path(__file__).parent / "trading_agent.db"
 
 
 # ── Initialisation ──────────────────────────────────────────────────────────
+
+
+# Colonnes disciplinaires ajoutees en v2 (migration idempotente)
+_NEW_COLUMNS_V2: list[tuple[str, str]] = [
+    ("thesis",                "TEXT"),
+    ("conviction_pct",        "INTEGER"),
+    ("invalidation",          "TEXT"),
+    ("tilt",                  "INTEGER"),
+    ("process_score",         "INTEGER"),
+    ("gate_verdict",          "TEXT"),
+    ("gate_overridden",       "INTEGER"),
+    ("rules_violated",        "TEXT"),
+    ("initial_stop_violated", "INTEGER"),
+    ("held_overnight",        "INTEGER"),
+]
+
+
+def _migrate_trades_v2(db_path: Path = DB_PATH) -> None:
+    """Migration idempotente : ajoute les colonnes disciplinaires v2 si absentes."""
+    with sqlite3.connect(db_path) as conn:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
+        added: list[str] = []
+        for col_name, col_type in _NEW_COLUMNS_V2:
+            if col_name not in existing:
+                conn.execute(f"ALTER TABLE trades ADD COLUMN {col_name} {col_type}")
+                added.append(col_name)
+        if added:
+            print(f"[Journal] Migration v2: colonnes ajoutees: {', '.join(added)}")
+        else:
+            print("[Journal] Migration v2: schema deja a jour")
+
 
 def init_db(db_path: Path = DB_PATH) -> None:
     """Crée les tables si elles n'existent pas."""
@@ -60,6 +92,7 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 market_regime    TEXT
             );
         """)
+    _migrate_trades_v2(db_path)
 
 
 # ── Écriture ────────────────────────────────────────────────────────────────
@@ -183,14 +216,14 @@ def get_score_trend(ticker: str, days: int = 7, db_path: Path = DB_PATH) -> dict
 # ── Journal de trading ──────────────────────────────────────────────────────
 
 def save_trade(trade_dict: dict, db_path: Path = DB_PATH) -> int:
-    """
-    Enregistre un nouveau trade OPEN.
+    """Enregistre un nouveau trade OPEN avec champs disciplinaires optionnels.
 
-    Champs requis : ticker, entry_price, stop_price, target_price, shares
-    Champs optionnels : setup_type, direction, notes, score_at_entry,
-                        market_regime, risk_pct, date_open
-
-    Retourne l'id du trade créé.
+    Requis : ticker, entry_price, stop_price, target_price, shares.
+    Pre-trade : thesis, conviction_pct (0-100), invalidation, tilt (1-5),
+                process_score (1-10). Validation des bornes : faite cote API.
+    Gate      : gate_verdict, rules_violated (liste ou JSON string).
+    gate_overridden = 1 si gate_verdict != GO (ou GO-WARN / NO-GO).
+    Retourne l id du trade cree.
     """
     entry  = float(trade_dict["entry_price"])
     stop   = float(trade_dict["stop_price"])
@@ -202,14 +235,33 @@ def save_trade(trade_dict: dict, db_path: Path = DB_PATH) -> int:
     rr_planned     = round((target - entry) / risk_per_share, 2) if risk_per_share > 0 else 0.0
     date_open      = trade_dict.get("date_open", datetime.now().strftime("%Y-%m-%d %H:%M"))
 
+    # Champs pre-trade disciplinaires
+    thesis         = trade_dict.get("thesis")
+    conviction_pct = trade_dict.get("conviction_pct")
+    invalidation   = trade_dict.get("invalidation")
+    tilt           = trade_dict.get("tilt")
+    process_score  = trade_dict.get("process_score")
+
+    # Champs gate
+    gate_verdict    = trade_dict.get("gate_verdict")
+    gate_overridden = 1 if gate_verdict and gate_verdict != "GO" else 0
+    raw_violated    = trade_dict.get("rules_violated", [])
+    if isinstance(raw_violated, list):
+        rules_violated = json.dumps(raw_violated) if raw_violated else None
+    else:
+        rules_violated = raw_violated if raw_violated else None
+
     with sqlite3.connect(db_path) as conn:
         cursor = conn.execute(
             """
             INSERT INTO trades
                 (date_open, ticker, direction, setup_type, entry_price, stop_price,
                  target_price, shares, risk_dollars, risk_pct, rr_planned, status,
-                 notes, score_at_entry, market_regime)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)
+                 notes, score_at_entry, market_regime,
+                 thesis, conviction_pct, invalidation, tilt, process_score,
+                 gate_verdict, gate_overridden, rules_violated)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 date_open,
@@ -223,9 +275,12 @@ def save_trade(trade_dict: dict, db_path: Path = DB_PATH) -> int:
                 trade_dict.get("notes"),
                 trade_dict.get("score_at_entry"),
                 trade_dict.get("market_regime"),
+                thesis, conviction_pct, invalidation, tilt, process_score,
+                gate_verdict, gate_overridden, rules_violated,
             ),
         )
         return cursor.lastrowid
+
 
 
 def update_trade(trade_id: int, updates: dict, db_path: Path = DB_PATH) -> None:
@@ -235,6 +290,9 @@ def update_trade(trade_id: int, updates: dict, db_path: Path = DB_PATH) -> None:
         "entry_price", "stop_price", "target_price", "close_price", "shares",
         "risk_dollars", "risk_pct", "rr_planned", "rr_realized", "pnl_dollars",
         "status", "notes", "score_at_entry", "market_regime",
+        "thesis", "conviction_pct", "invalidation", "tilt", "process_score",
+        "gate_verdict", "gate_overridden", "rules_violated",
+        "initial_stop_violated", "held_overnight",
     }
     clean = {k: v for k, v in updates.items() if k in _ALLOWED}
     if not clean:
@@ -247,21 +305,24 @@ def update_trade(trade_id: int, updates: dict, db_path: Path = DB_PATH) -> None:
         )
 
 
-def close_trade(trade_id: int, close_price: float, notes: str | None = None,
-                db_path: Path = DB_PATH) -> dict | None:
-    """
-    Clôture un trade et calcule automatiquement :
-    - pnl_dollars  = (close_price - entry_price) * shares
-    - rr_realized  = (close_price - entry_price) / (entry_price - stop_price)
-    - status       = CLOSED_WIN / CLOSED_LOSS / CLOSED_BE
+def close_trade(
+    trade_id: int,
+    close_price: float,
+    notes: str | None = None,
+    initial_stop_violated: int | None = None,
+    rr_realized_override: float | None = None,
+    held_overnight: int | None = None,
+    db_path: Path = DB_PATH,
+) -> dict | None:
+    """Cloture un trade et calcule PnL, R:R realise et statut.
 
-    Règle status :
-      close >= target          → CLOSED_WIN
-      close <= stop            → CLOSED_LOSS
-      |pnl| <= 0.5R            → CLOSED_BE
-      sinon                    → CLOSED_WIN / CLOSED_LOSS selon pnl
-
-    Retourne le trade mis à jour, ou None si introuvable.
+    Calcule automatiquement pnl_dollars, rr_realized (sauf si rr_realized_override
+    fourni), et status (CLOSED_WIN/LOSS/BE).
+    Stocke les champs disciplinaires post-trade si fournis :
+      initial_stop_violated : 1 si le stop initial a ete modifie apres l entree
+      held_overnight        : 1 si la position a ete maintenue hors session
+      rr_realized_override  : remplace le R:R auto-calcule (ex. pour saisie manuelle)
+    Retourne le trade mis a jour, ou None si introuvable.
     """
     trade = get_trade_by_id(trade_id, db_path=db_path)
     if trade is None:
@@ -274,7 +335,11 @@ def close_trade(trade_id: int, close_price: float, notes: str | None = None,
     risk   = entry - stop
 
     pnl_dollars = round((close_price - entry) * shares, 2)
-    rr_realized = round((close_price - entry) / risk, 2) if risk != 0 else 0.0
+    rr_realized = (
+        rr_realized_override
+        if rr_realized_override is not None
+        else (round((close_price - entry) / risk, 2) if risk != 0 else 0.0)
+    )
 
     if close_price >= target:
         status = "CLOSED_WIN"
@@ -294,9 +359,12 @@ def close_trade(trade_id: int, close_price: float, notes: str | None = None,
     }
     if notes:
         upd["notes"] = notes
+    if initial_stop_violated is not None:
+        upd["initial_stop_violated"] = initial_stop_violated
+    if held_overnight is not None:
+        upd["held_overnight"] = held_overnight
     update_trade(trade_id, upd, db_path=db_path)
     return get_trade_by_id(trade_id, db_path=db_path)
-
 
 def get_open_trades(db_path: Path = DB_PATH) -> list[dict]:
     """Retourne tous les trades avec status=OPEN, triés par date décroissante."""
