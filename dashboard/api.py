@@ -313,6 +313,42 @@ def get_setups(extra_tickers: str = ""):
         })
 
 
+@app.post("/api/pretrade/evaluate")
+def pretrade_evaluate(payload: dict):
+    """Gate pre-trade : verdict GO/NO-GO/GO-WARN + detail des checks.
+
+    Body JSON attendu :
+        capital, risk_pct, entry, stop, target  — obligatoires
+        now                 str ISO  — datetime CET (defaut = maintenant)
+        open_risk_amount    float    — dollars a risque sur positions ouvertes
+        open_notional       float    — notionnel total positions ouvertes
+        trades_today        int|null — override du comptage DB (null = auto)
+    """
+    try:
+        from analysis.pretrade_gate import evaluate_trade
+        from datetime import datetime as _dt
+
+        now_raw = payload.get("now")
+        now = _dt.fromisoformat(now_raw) if now_raw else None
+
+        trades_today_raw = payload.get("trades_today")
+        trades_today = int(trades_today_raw) if trades_today_raw is not None else None
+
+        return evaluate_trade(
+            capital=float(payload.get("capital", 10000)),
+            risk_pct=float(payload.get("risk_pct", 1.0)),
+            entry=float(payload.get("entry", 0)),
+            stop=float(payload.get("stop", 0)),
+            target=float(payload.get("target", 0)),
+            now=now,
+            open_risk_amount=float(payload.get("open_risk_amount", 0.0)),
+            open_notional=float(payload.get("open_notional", 0.0)),
+            trades_today=trades_today,
+        )
+    except Exception as e:
+        return clean_for_json({"error": str(e), "verdict": "NO-GO", "checks": []})
+
+
 @app.post("/api/risk/size")
 def risk_size(payload: dict):
     """Valide et calcule la taille d'une position LONG via le moteur de risque autoritaire.
