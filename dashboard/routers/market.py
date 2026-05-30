@@ -236,7 +236,7 @@ def get_breadth():
 
 
 @router.get("/history")
-def get_history(days: int = 14):
+def get_score_history_endpoint(days: int = 14):
     """Historique des scores sur N jours pour les tickers avec données."""
     try:
         history = {}

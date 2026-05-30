@@ -250,7 +250,7 @@ def scan_buzztickers() -> list:
     import requests
     import re
     url = "https://www.reddit.com/r/buzztickr/new.json?limit=10"
-    headers = {"User-Agent": "SMC-AI-Scanner/1.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
     try:
         resp = requests.get(url, headers=headers, timeout=15)
         data = resp.json()
@@ -445,7 +445,7 @@ def _scan_reddit_impl(cache_ttl: int = 1800) -> dict:
         "Daytrading", "StockMarket", "options", "buzztickr",
     ]
     watchlist_set = set(t.upper() for t in WATCHLIST)
-    headers = {"User-Agent": "SMC-AI-Scanner/2.0"}
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
 
     ticker_data: dict = {}   # ticker â†’ {mentions, score_sum, upvote_sum, count, subreddits}
     total_posts = 0

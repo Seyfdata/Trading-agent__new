@@ -124,7 +124,10 @@ def get_proposals(capital: float = 10000.0):
         from analysis.scoring import score_ticker, score_market_context, rank_tickers
 
         # 1. Contexte marché
-        ctx = score_market_context()
+        from scrapers.market_data import get_market_context
+        from dashboard.routers.market import _extract_scoring_ctx
+        _raw_mkt = get_market_context()
+        ctx = score_market_context(_extract_scoring_ctx(_raw_mkt))
         regime = ctx.get("regime", "UNKNOWN")
 
         if regime == "BEAR":

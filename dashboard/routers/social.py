@@ -25,6 +25,12 @@ from analysis.technical_indicators import clean_for_json
 from database.models import get_open_trades
 from dashboard.state import _TEMP_WATCHLIST, _today_alerts, _seen_news_titles
 
+try:
+    import yfinance as _yf  # noqa: F401
+    _YF_AVAILABLE = True
+except ImportError:
+    _YF_AVAILABLE = False
+
 router = APIRouter()
 
 # ── Sentiment helpers ─────────────────────────────────────────────────────────
