@@ -48,6 +48,59 @@ Le **SMC-AI Trading Agent** est un cockpit de trading personnel. Il tourne enti�
 - Garantir des gains (aucun outil ne peut le faire)
 - Remplacer ton jugement
 
+# Interface et Utilisation Opérationnelle
+
+##Maîtriser l'onglet "Vue d'ensemble" (Le Cockpit Central)
+
+L'onglet **Vue d'ensemble** est le point de départ incontournable de chaque session de trading. Il rassemble en une seule interface l'environnement macroéconomique mondial, la configuration dynamique des algorithmes et les opportunités d'achat d'élite sélectionnées en temps réel par le bot.
+
+---
+
+### La Boussole Macro & Inter-Marchés (Section Supérieure)
+
+Cette section agit comme le **premier filtre de sécurité** de votre capital avant toute considération d'analyse technique graphique.
+
+**Boussole de Marché :** Scanne en continu la tendance lourde des indices américains (`S&P 500`, `NASDAQ`), le niveau de volatilité et de peur institutionnelle (`VIX`), la force de la devise (`DXY`) et le rendement des taux obligataires (`US 10Y`). Elle détermine si le flux institutionnel global soutient ou rejette les actions.
+**Indicateurs Macro :** Analyse la structure complète de la courbe des taux d'intérêt (`Treasuries` de 13 semaines à 30 ans) ainsi que les matières premières clés (`Gold`, `WTI Crude`). C'est le capteur d'inflation par les coûts et de réallocation des capitaux de la *Smart Money*.
+ **Matrice Algorithmique (Bandeau de Confluence) :**
+ * **Régime :** Synthétise la santé globale du marché sur une échelle de 0 à 100 (ex: *NEUTRAL 40/100*).
+**Sizing (Gestion du Risque) :** Ajuste dynamiquement votre allocation maximale par transaction (ex: *0.5% Risk* au lieu du risque standard de 1.0% si l'environnement macroéconomique se dégrade), ce qui est indispensable pour protéger un compte cash réel.
+**Verdict :** Délivre l'autorisation finale d'exécuter un trade ou l'ordre strict de rester à l'écart (*GO* ou *SIT ON HANDS*).
+
+---
+
+### Le Moteur de Sélection : "Top 3 Du Jour" (Section Centrale)
+
+C'est ici que l'intelligence artificielle du bot extrait la "crème de la crème" de votre watchlist globale.
+
+* **Le Concept :** Le bot utilise un algorithme de scoring composite (le `Unified Scorer`). Il passe au tamis les critères fondamentaux, les volumes, le sentiment social (Reddit) et les structures algorithmiques Smart Money Concepts (SMC - BOS/CHoCH/FVG).
+* **Les Cartes de Proposition (ex: AAPL, NVDA, MSFT) :** Chaque ticker sélectionné affiche :
+    * **Le Score Composite :** Une note globale sur 100 indiquant le niveau de confluence.
+    * **Le Sizing Recommandé :** Le montant exact en dollars à allouer, calculé automatiquement selon les règles de gestion des risques dictées par le bandeau supérieur et le capital total disponible du compte.
+* **L'intérêt en Trading :** Cette section évite au trader de perdre du temps à analyser manuellement des dizaines de graphiques. Elle isole instantanément les 3 configurations qui possèdent les plus fortes probabilités de réussite mathématique à l'instant T.
+
+---
+
+### Le Suivi Opérationnel : Positions Ouvertes (Section Inférieure)
+
+Une fois le filtre macro validé et le Top 3 identifié, cette table vous permet de piloter et de défendre vos lignes actives en temps réel.
+
+**Les Métriques Clés par Ligne :**
+    * `Ticker` / `Type` (ex: *LONG*) / `Quantité` / `Prix d'entrée`.
+    * `Prix Actuel` & `Variation (%)` : Performance brute de l'action en direct.
+    * `P&L Actuel ($)` : La plus-value ou moins-value latente convertie dans la devise de votre compte de trading.
+**L'intérêt en Trading :** Ce tableau permet de confronter immédiatement vos positions en cours avec l'état de la boussole macro. 
+    > **Exemple concret :** Si vos positions ouvertes commencent à montrer des signes de faiblesse (P&L dans le rouge) au moment exact où la *Boussole de Marché* vire au rouge vif (VIX en hausse, Indices en baisse), cela vous donne le signal visuel immédiat pour sécuriser vos gains ou couper vos pertes manuellement sans attendre vos objectifs théoriques.
+
+---
+
+### 📋 Routine de Lecture Rapide (Workflow Utilisateur)
+
+Pour exploiter au mieux cet onglet, appliquez cette routine visuelle de 10 secondes à chaque début de session :
+
+1. **Regarder le VERDICT & SIZING** ──► Autorise, restreint ou bride l'activité du jour.
+2. **Consulter le TOP 3 DU JOUR** ──► Isole les cibles graphiques et SMC prioritaires à surveiller sur TradingView.
+3. **Monitorer les POSITIONS** ──► Ajuste la défense du capital engagé et gère les sorties de positions.
 ---
 
 ## 2. Lancer l'application

@@ -116,6 +116,11 @@ GET  /api/performance/advanced → Sharpe, Sortino, Monte Carlo
 GET  /api/backtest/{ticker}   → backtest 3 stratégies
 GET  /api/backtest/report     → rapport global backtest
 
+# Cockpit de discipline
+POST /api/pretrade/evaluate   → verdict GO/GO-WARN/NO-GO (gate 5 checks)
+POST /api/risk/size           → sizing position + cap déploiement cash
+GET  /api/discipline/report   → métriques disciplinaires (process score, tilt, resulting)
+
 # Utilitaires
 GET  /api/ping                → healthcheck
 GET  /api/history             → historique scores (14j par défaut)
@@ -182,9 +187,10 @@ DELETE /api/watchlist/temp/{t} → retirer ticker temporaire
 | Phase 1 — Morning Brief PRO | ✅ |
 | Phase 2 — Scoring + Dashboard | ✅ |
 | Phase 3 — SMC, options, backtest, Coach, Pullback Scanner, RS Scout | ✅ 100% |
+| Phase 3.5 — Cockpit de discipline (risk engine, gate GO/NO-GO, journal Kahneman, panneau resulting) | ✅ |
 | Phase 4 — Connexion IBKR API | ⬜ À venir |
 
-**Priorités actuelles** : utiliser le journal de trades dès maintenant, exploiter tous les onglets (Propositions → Analyse → Journal).
+**Priorités actuelles** : utiliser le cockpit de discipline (Journal → gate → fields → resulting) avant chaque trade.
 
 ---
 
@@ -268,6 +274,7 @@ Invoquer avec `/ecc:<skill>` ou `/nom-court` :
 
 - `GUIDE_UTILISATEUR.md` — guide complet pour l'utilisateur final (débutant)
 - `ROADMAP.md` — roadmap consolidée
-- `skills/trading-coach.skill` — skill pour le coaching trading
-- `skills/webapp-testing.skill` — skill pour les tests webapp
+- `SKILL.md` — skill NotebookLM (prompts quant ancrés dans la bibliothèque de Seyf)
+- `references/corpus-map.md` — carte des sources NotebookLM par notebook thématique
+- `references/prompt-library.md` — bibliothèque de prompts NotebookLM réutilisables
 - `everything-claude-code/` — repo ECC local (ne pas modifier)

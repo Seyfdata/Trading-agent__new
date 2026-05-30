@@ -9,7 +9,20 @@
       "Bash(python -c \"from database.models import init_db; init_db\\(\\); print\\(''DB OK''\\)\")",
       "Bash(python -c \"from config.settings import WATCHLIST; print\\(f''{len\\(WATCHLIST\\)} tickers OK''\\)\")",
       "Bash(python -c \":*)",
-      "Bash(git commit -m \"Phase 2B Sprint 5+6 : journal trading, performance, indicateurs macro:*)"
+      "Bash(git ls-files *)",
+      "Bash(git worktree *)",
+      "PowerShell(head)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "mcp__plugin_ecc_exa__web_search_exa",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"from dashboard.api import app; print\\('API OK'\\)\")",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(pip --version)",
+      "Bash(git commit *)",
+      "PowerShell(git stash)",
+      "PowerShell(python -c \"c = open\\('dashboard/index.html', encoding='utf-8'\\).read\\(\\); print\\(f'<div: {c.count\\(chr\\(60\\)+chr\\(100\\)+chr\\(105\\)+chr\\(118\\)\\)}, </div>: {c.count\\(chr\\(60\\)+chr\\(47\\)+chr\\(100\\)+chr\\(105\\)+chr\\(118\\)+chr\\(62\\)\\)}'\\)\")"
     ]
   }
 }
