@@ -75,6 +75,22 @@ def validate_and_size(
 
     violations: list[str] = []
 
+    # --- Regle 0 : capital > 0 (sinon divisions impossibles -> NO-GO propre) ---
+    if capital <= 0:
+        violations.append(f"Capital invalide: ${capital} (doit etre > 0)")
+        result = {
+            "verdict": "NO-GO",
+            "violations": violations,
+            "shares": 0,
+            "risk_amount": 0.0,
+            "rr": 0.0,
+            "risk_exposure_pct": 0.0,
+            "deployed_pct": 0.0,
+            "position_value": 0.0,
+        }
+        print(f"[RiskEngine] => NO-GO | capital<=0 | violations={violations}")
+        return clean_for_json(result)
+
     # --- Règle 1 : direction LONG obligatoire ---
     if not (target > entry > stop):
         violations.append(

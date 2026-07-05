@@ -357,15 +357,17 @@ def risk_size(payload: dict):
     """Valide et calcule la taille d'une position LONG via le moteur de risque autoritaire.
 
     Body JSON attendu :
-        capital               float  — capital total du compte (USD)
-        risk_pct              float  — risque en % du capital (ex. 1.0)
-        entry                 float  — prix d'entrée
-        stop                  float  — stop-loss (< entry)
-        target                float  — cible (> entry)
-        open_positions_value  float  — valeur positions ouvertes (défaut 0)
-        trades_today          int    — trades déjà pris aujourd'hui (défaut 0)
+        capital           float  — capital total du compte (USD)
+        risk_pct          float  — risque en % du capital (ex. 1.0)
+        entry             float  — prix d'entrée
+        stop              float  — stop-loss (< entry)
+        target            float  — cible (> entry)
+        open_risk_amount  float  — dollars déjà à risque sur positions ouvertes (défaut 0)
+        open_notional     float  — notionnel total des positions ouvertes (défaut 0)
+        trades_today      int    — trades déjà pris aujourd'hui (défaut 0)
 
-    Retour : { verdict, violations, shares, risk_amount, rr, exposure_pct, position_value }
+    Retour : { verdict, violations, shares, risk_amount, rr, risk_exposure_pct,
+               deployed_pct, position_value }
     """
     try:
         from analysis.risk_engine import validate_and_size
@@ -375,7 +377,8 @@ def risk_size(payload: dict):
             entry=float(payload.get("entry", 0)),
             stop=float(payload.get("stop", 0)),
             target=float(payload.get("target", 0)),
-            open_positions_value=float(payload.get("open_positions_value", 0.0)),
+            open_risk_amount=float(payload.get("open_risk_amount", 0.0)),
+            open_notional=float(payload.get("open_notional", 0.0)),
             trades_today=int(payload.get("trades_today", 0)),
         )
         return result
