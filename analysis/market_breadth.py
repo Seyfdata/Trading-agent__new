@@ -67,6 +67,7 @@ def get_market_breadth() -> dict:
             auto_adjust=True,
             progress=False,
             threads=True,
+            timeout=15,
         )
         if raw is None or raw.empty:
             fallback["error"] = "Pas de données yfinance"

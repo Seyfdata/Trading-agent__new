@@ -383,6 +383,7 @@ def get_reddit_discoveries(
     # â”€â”€ Enrichissement LÃ‰GER : price + change_pct seulement â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     try:
         import yfinance as yf
+        from core.data_provider import call_with_timeout
         _yf_ok = True
     except ImportError:
         _yf_ok = False
@@ -392,7 +393,10 @@ def get_reddit_discoveries(
         if not _yf_ok:
             break
         try:
-            hist = yf.Ticker(d["ticker"]).history(period="5d", interval="1d")
+            # Borne dure : un ticker qui traine ne bloque pas l'enrichissement des autres.
+            hist = call_with_timeout(
+                lambda: yf.Ticker(d["ticker"]).history(period="5d", interval="1d")
+            )
             if hist is not None and len(hist) >= 1:
                 d["price"] = round(float(hist["Close"].iloc[-1]), 2)
                 if len(hist) >= 2:

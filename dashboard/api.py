@@ -33,6 +33,7 @@ Endpoints :
 """
 
 import json
+import math
 import sys
 import time
 from datetime import datetime
@@ -44,6 +45,18 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from core.cache import cache_get
 from analysis.technical_indicators import clean_for_json
+
+
+def _nonfinite_fields(values: dict) -> list[str]:
+    """Retourne les clés dont la valeur n'est pas un float fini (NaN/inf/non numérique)."""
+    bad = []
+    for key, raw in values.items():
+        try:
+            if not math.isfinite(float(raw)):
+                bad.append(key)
+        except (TypeError, ValueError):
+            bad.append(key)
+    return bad
 
 DASHBOARD_HTML = Path(__file__).parent / "index.html"
 REDDIT_SCANNER = Path(__file__).parent.parent / "RedditScanner" / "main.py"
@@ -337,6 +350,19 @@ def pretrade_evaluate(payload: dict):
         trades_today_raw = payload.get("trades_today")
         trades_today = int(trades_today_raw) if trades_today_raw is not None else None
 
+        bad = _nonfinite_fields({
+            "capital": payload.get("capital", 10000),
+            "risk_pct": payload.get("risk_pct", 1.0),
+            "entry": payload.get("entry", 0),
+            "stop": payload.get("stop", 0),
+            "target": payload.get("target", 0),
+        })
+        if bad:
+            return clean_for_json({
+                "verdict": "NO-GO", "checks": [],
+                "error": f"Valeur(s) non finie(s) (NaN/inf): {', '.join(bad)}",
+            })
+
         return evaluate_trade(
             capital=float(payload.get("capital", 10000)),
             risk_pct=float(payload.get("risk_pct", 1.0)),
@@ -371,6 +397,18 @@ def risk_size(payload: dict):
     """
     try:
         from analysis.risk_engine import validate_and_size
+        bad = _nonfinite_fields({
+            "capital": payload.get("capital", 0),
+            "risk_pct": payload.get("risk_pct", 1.0),
+            "entry": payload.get("entry", 0),
+            "stop": payload.get("stop", 0),
+            "target": payload.get("target", 0),
+        })
+        if bad:
+            return clean_for_json({
+                "verdict": "NO-GO",
+                "violations": [f"Valeur(s) non finie(s) (NaN/inf): {', '.join(bad)}"],
+            })
         result = validate_and_size(
             capital=float(payload.get("capital", 0)),
             risk_pct=float(payload.get("risk_pct", 1.0)),

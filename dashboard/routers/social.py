@@ -460,12 +460,12 @@ def get_news():
         ticker_titles = {n["title"] for n in ticker_news}
         keyword_only  = [n for n in keyword_news if n["title"] not in ticker_titles]
 
-        return {
+        return clean_for_json({
             "total_fetched": len(all_news),
             "ticker_news":   _enrich(ticker_news, "TICKER"),
             "market_news":   _enrich(keyword_only, "MACRO"),
             "updated_at":    datetime.now().isoformat(),
-        }
+        })
     except Exception as e:
         return {"error": str(e), "ticker_news": [], "market_news": []}
 
@@ -478,7 +478,7 @@ def get_macro():
         earnings = check_earnings_today()
         reco     = get_trading_recommendation(events, earnings)
 
-        return {
+        return clean_for_json({
             "date":    datetime.now().strftime("%Y-%m-%d"),
             "verdict": reco["verdict"],
             "raison":  reco["raison"],
@@ -489,7 +489,7 @@ def get_macro():
             ],
             "earnings_today": earnings,
             "updated_at":     datetime.now().isoformat(),
-        }
+        })
     except Exception as e:
         return {"error": str(e), "verdict": "INCONNU", "events": [], "earnings_today": []}
 
@@ -670,6 +670,6 @@ def get_alerts_news():
                     "sentiment":       _news_sentiment(title, n.get("summary", "")),
                     "fetched_at":      fetched_at,
                 })
-        return {"new_news": new_news, "total_checked": len(combined)}
+        return clean_for_json({"new_news": new_news, "total_checked": len(combined)})
     except Exception as e:
         return {"new_news": [], "total_checked": 0, "error": str(e)}

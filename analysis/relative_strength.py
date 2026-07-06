@@ -85,6 +85,7 @@ def calc_alpha(ticker: str, benchmark: str = "SPY", periods: list | None = None)
             auto_adjust=True,
             progress=False,
             threads=True,
+            timeout=15,
         )
         if raw is None or raw.empty:
             result["error"] = "Pas de données yfinance"

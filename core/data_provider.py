@@ -13,6 +13,7 @@ Usage :
 """
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 from typing import Optional
 
@@ -27,6 +28,20 @@ _TTL_INTRADAY  = 60        # 1 min  — données temps réel
 _TTL_DAILY     = 300       # 5 min  — OHLCV journalier
 _TTL_WEEKLY    = 3_600     # 1 h    — données hebdo / longue période
 _TTL_FAST_INFO = 60        # 1 min  — last_price, previous_close
+
+# Borne dure (wall-clock) sur tout appel réseau yfinance. yfinance 1.3.0
+# n'expose pas de timeout sur Ticker.history()/fast_info ; un socket bloqué
+# figerait le dashboard. Un executor dédié rend la main à l'appelant en
+# _YF_TIMEOUT s au plus (le thread orphelin se termine seul).
+_YF_TIMEOUT  = 15
+_YF_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=8, thread_name_prefix="yf-timeout"
+)
+
+
+def call_with_timeout(fn, *args, timeout: int = _YF_TIMEOUT, **kwargs):
+    """Exécute fn(*args, **kwargs) avec une borne dure. Lève TimeoutError si dépassé."""
+    return _YF_EXECUTOR.submit(fn, *args, **kwargs).result(timeout=timeout)
 
 
 def get_history(
@@ -69,10 +84,12 @@ def get_history(
             ttl = _TTL_WEEKLY
 
     try:
-        df = yf.Ticker(ticker).history(
-            period=period,
-            interval=interval,
-            auto_adjust=True,
+        df = call_with_timeout(
+            lambda: yf.Ticker(ticker).history(
+                period=period,
+                interval=interval,
+                auto_adjust=True,
+            )
         )
         if df is None:
             df = pd.DataFrame()
@@ -116,7 +133,7 @@ def get_fast_info(ticker: str) -> object:
         return cached
 
     try:
-        fi = yf.Ticker(ticker).fast_info
+        fi = call_with_timeout(lambda: yf.Ticker(ticker).fast_info)
         cache_set(cache_key, fi, ttl_seconds=_TTL_FAST_INFO)
         return fi
     except Exception as exc:

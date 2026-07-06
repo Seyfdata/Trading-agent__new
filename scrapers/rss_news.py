@@ -6,7 +6,12 @@ Phase 2 : c'est le premier module que tu fais tourner.
 """
 
 import feedparser
+import requests
 from config.settings import RSS_FEEDS, WATCHLIST, MARKET_KEYWORDS, TICKER_ALIASES
+
+# Timeout reseau par flux (s) : evite qu'un serveur RSS lent/bloque fige /api/news.
+_RSS_TIMEOUT = 10
+_RSS_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
 def fetch_all_news(max_per_feed=5):
@@ -20,7 +25,10 @@ def fetch_all_news(max_per_feed=5):
 
     for source_name, feed_url in RSS_FEEDS.items():
         try:
-            feed = feedparser.parse(feed_url)
+            # requests avec timeout puis parse du contenu : feedparser.parse(url)
+            # ne pose aucun timeout et peut bloquer indefiniment sur un flux lent.
+            resp = requests.get(feed_url, timeout=_RSS_TIMEOUT, headers=_RSS_HEADERS)
+            feed = feedparser.parse(resp.content)
 
             for entry in feed.entries[:max_per_feed]:
                 all_news.append({

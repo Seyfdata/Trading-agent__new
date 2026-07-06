@@ -258,11 +258,11 @@ def get_score_history_endpoint(days: int = 14):
             sorted(history.items(), key=_latest_score, reverse=True)[:5]
         )
 
-        return {
+        return clean_for_json({
             "days": days,
             "tickers": top5,
             "updated_at": datetime.now().isoformat(),
-        }
+        })
     except Exception as e:
         return {"error": str(e), "tickers": {}}
 
@@ -391,7 +391,7 @@ def refresh():
 
         duration = round(time.time() - t0, 1)
         print(f"[API /refresh] Scan terminé — {len(scored_list)} tickers | {duration}s")
-        return {"status": "ok", "duration": duration, "tickers": len(scored_list)}
+        return clean_for_json({"status": "ok", "duration": duration, "tickers": len(scored_list)})
 
     except Exception as e:
         duration = round(time.time() - t0, 1)
