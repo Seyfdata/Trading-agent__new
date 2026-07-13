@@ -147,7 +147,6 @@ KILLZONE_START_HOUR = int(_kz_start[0])
 KILLZONE_START_MIN = int(_kz_start[1])
 KILLZONE_END_HOUR = int(_kz_end[0])
 KILLZONE_END_MIN = int(_kz_end[1])
-KILLZONE_TEST_MODE = False   # Mettre True pour forcer la killzone en dev
 
 # Sessions de marché (heures CET / Europe/Paris)
 TZ_MARKET          = "Europe/Paris"

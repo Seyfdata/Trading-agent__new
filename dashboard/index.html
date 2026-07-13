@@ -3906,6 +3906,7 @@ function JournalTab(props) {
         ticker: form.ticker, entry_price: parseFloat(form.entry_price),
         stop_price: parseFloat(form.stop_price), target_price: parseFloat(form.target_price),
         shares: live.shares, setup_type: form.setup_type, direction: form.direction,
+        risk_pct: _RISK_PCT_J * 100,
         notes: form.notes || null,
         thesis: form.thesis || null,
         conviction_pct: form.conviction_pct !== '' ? parseInt(form.conviction_pct) : null,

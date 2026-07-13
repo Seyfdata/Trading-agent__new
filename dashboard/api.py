@@ -59,7 +59,6 @@ def _nonfinite_fields(values: dict) -> list[str]:
     return bad
 
 DASHBOARD_HTML = Path(__file__).parent / "index.html"
-REDDIT_SCANNER = Path(__file__).parent.parent / "RedditScanner" / "main.py"
 
 # ── Imports internes ────────────────────────────────────────────────────────
 
@@ -78,16 +77,22 @@ from database.models import (
     get_open_trades, DB_PATH,
 )
 
-try:
-    import yfinance as _yf
-    _YF_AVAILABLE = True
-except ImportError:
-    _yf = None
-    _YF_AVAILABLE = False
-
 # ── App ─────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Trading Agent API", version="1.0.0")
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialise la DB au démarrage du serveur (remplace @app.on_event)."""
+    try:
+        init_db()
+    except Exception as e:
+        print(f"[API] init_db erreur : {e}")
+    yield
+
+
+app = FastAPI(title="Trading Agent API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -98,15 +103,6 @@ app.add_middleware(
 )
 
 from dashboard.state import _TEMP_WATCHLIST, _today_alerts, _seen_news_titles
-
-
-# Initialise la DB au démarrage du serveur
-@app.on_event("startup")
-def startup():
-    try:
-        init_db()
-    except Exception as e:
-        print(f"[API] init_db erreur : {e}")
 
 
 
@@ -389,24 +385,6 @@ def risk_size(payload: dict):
         return result
     except Exception as e:
         return clean_for_json({"error": str(e), "verdict": "NO-GO", "violations": [str(e)]})
-
-
-# ── Test pages ────────────────────────────────────────────────────────────────
-
-@app.get("/journal-test", response_class=HTMLResponse)
-def serve_journal_test():
-    """Page de test isolée pour le composant JournalTab."""
-    p = Path(__file__).parent / "journal_test.html"
-    if p.exists():
-        return p.read_text(encoding="utf-8")
-    return HTMLResponse("<h1>journal_test.html introuvable</h1>", status_code=404)
-
-
-@app.get("/test", response_class=HTMLResponse)
-def serve_test():
-    """Page de test React minimale."""
-    test_path = Path(__file__).parent / "test.html"
-    return test_path.read_text(encoding="utf-8")
 
 
 # ── Dashboard HTML ────────────────────────────────────────────────────────────
