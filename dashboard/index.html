@@ -725,7 +725,7 @@ function OverviewTab(props) {
     fetch('/api/proposals?capital=10000')
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        var top = d.proposals && d.proposals.length > 0 ? d.proposals[0] : null;
+        var top = d.watch_zones && d.watch_zones.length > 0 ? d.watch_zones[0] : null;
         setQp({ data: top, loading: false, error: null });
       })
       .catch(function() { setQp({ data: null, loading: false, error: true }); });
@@ -755,21 +755,19 @@ function OverviewTab(props) {
         <div className="card mb16" style={{ borderLeft: '4px solid var(--accent)', padding: '16px 20px' }}>
           <div className="rowb" style={{ marginBottom: 10 }}>
             <div className="row g8">
-              <span style={{ fontWeight: 700, fontSize: 13 }}>PROPOSITION DU JOUR</span>
-              <span style={{ fontSize: 11, fontWeight: 700, color: _gradeColor(qpTop.grade), background: _gradeColor(qpTop.grade) + '18', padding: '2px 8px', borderRadius: 4 }}>{qpTop.grade}</span>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>ZONE À SURVEILLER</span>
+              <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted)', background: 'var(--bg)', padding: '2px 8px', borderRadius: 4 }}>descriptif — pas une reco</span>
             </div>
             <button className="btn" style={{ fontSize: 10, padding: '3px 10px' }} onClick={onGoToProposals}>Voir toutes</button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px', fontSize: 13, marginBottom: 8 }}>
             <div><div className="mc" style={{ fontSize: 10 }}>Ticker</div><div style={{ fontWeight: 700, fontSize: 22, color: 'var(--accent)' }}>{qpTop.ticker}</div></div>
-            <div><div className="mc" style={{ fontSize: 10 }}>R:R</div><div style={{ fontWeight: 700, fontSize: 20, color: 'var(--bull)' }}>{qpTop.rr_ratio}x</div></div>
-            <div><div className="mc" style={{ fontSize: 10 }}>Entree</div><div style={{ fontWeight: 600 }}>${qpTop.entry}</div></div>
-            <div><div className="mc" style={{ fontSize: 10 }}>Stop loss</div><div style={{ fontWeight: 600, color: 'var(--bear)' }}>${qpTop.stop}</div></div>
-            <div><div className="mc" style={{ fontSize: 10 }}>Cible TP2</div><div style={{ fontWeight: 600, color: 'var(--bull)' }}>${qpTop.tp2}</div></div>
-            <div><div className="mc" style={{ fontSize: 10 }}>Quantite</div><div style={{ fontWeight: 600 }}>{qpTop.shares} actions</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>Score</div><div style={{ fontWeight: 700, fontSize: 20 }}>{qpTop.score}/100</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>Cours actuel</div><div style={{ fontWeight: 600 }}>${qpTop.price}</div></div>
+            <div><div className="mc" style={{ fontSize: 10 }}>Convergence</div><div style={{ fontWeight: 600 }}>{qpTop.convergence}</div></div>
           </div>
-          {qpTop.reason && (
-            <div className="mc" style={{ fontSize: 11, paddingTop: 8, borderTop: '1px solid var(--border)' }}>{qpTop.reason}</div>
+          {qpTop.explanation && (
+            <div className="mc" style={{ fontSize: 11, paddingTop: 8, borderTop: '1px solid var(--border)' }}>{qpTop.explanation}</div>
           )}
         </div>
       )}
@@ -914,9 +912,6 @@ function PropositionsTab(props) {
   var onGoToSmc     = props.onGoToSmc     || function() {};
   var onGoToJournal = props.onGoToJournal || function() {};
 
-  var capState = useState(10000);
-  var capital  = capState[0]; var setCapital = capState[1];
-
   var dataState = useState(null);
   var propData  = dataState[0]; var setPropData = dataState[1];
 
@@ -925,23 +920,21 @@ function PropositionsTab(props) {
 
   function loadProposals() {
     setLoading(true);
-    fetch('/api/proposals?capital=' + capital)
+    fetch('/api/proposals')
       .then(function(r) { return r.json(); })
       .then(function(d) { setPropData(d); setLoading(false); })
       .catch(function() { setLoading(false); });
   }
 
-  function gradeFromStars(s) {
-    return ['', 'C', 'C+', 'B', 'A', 'A+'][s] || 'B';
-  }
-  function starColor(s) {
-    return s >= 4 ? '#10b981' : s >= 3 ? '#f59e0b' : '#ef4444';
-  }
   function pbLabel(status) {
-    return status === 'alert' ? '📉 Pullback fort' : status === 'watch' ? '👀 Pullback léger' : '';
+    return status === 'alert' ? '📉 Pullback fort' : status === 'watch' ? '👀 Pullback léger'
+      : status === 'overbought' ? '🔴 Suracheté' : '';
+  }
+  function zoneColor(conv) {
+    return conv >= 70 ? '#10b981' : conv >= 55 ? '#f59e0b' : 'var(--accent)';
   }
 
-  var proposals = propData && propData.proposals ? propData.proposals : [];
+  var proposals = propData && propData.watch_zones ? propData.watch_zones : [];
   var regime    = propData ? propData.regime : null;
 
   return (
@@ -950,33 +943,27 @@ function PropositionsTab(props) {
       <div className="card mb16" style={{ padding: '14px 18px' }}>
         <div className="rowb" style={{ marginBottom: 8 }}>
           <div>
-            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🎯 Propositions de Trade</div>
-            <div className="mc" style={{ fontSize: 11 }}>Convergence score + pullback + momentum — jusqu'à 3 opportunités actionnables. L'humain décide toujours.</div>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🔭 Zones à surveiller</div>
+            <div className="mc" style={{ fontSize: 11 }}>Descriptif : là où plusieurs signaux convergent (score, pullback, RSI/MACD/SMA). PAS des recommandations d'entrée — le sizing et le GO/NO-GO se font au moment du trade via le gate.</div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-            <span className="mc" style={{ fontSize: 11 }}>Capital $</span>
-            <input
-              type="number"
-              value={capital}
-              onChange={function(e) { setCapital(Number(e.target.value)); }}
-              style={{ width: 90, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 8px', color: 'var(--text)', fontFamily: 'inherit', fontSize: 12 }} />
             <button className={'btn' + (loading ? '' : ' btn-p')} onClick={loadProposals} disabled={loading}>
               {loading ? <span><span className="spin-anim">⟳</span> Analyse...</span> : '🔍 Analyser'}
             </button>
           </div>
         </div>
         <div style={{ fontSize: 10, color: 'var(--muted)', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-          ⚠️ Ces propositions sont indicatives — pas des conseils financiers. Le trading comporte des risques de perte en capital.
+          ⚠️ Vue descriptive — pas des conseils financiers ni des recommandations d'entrée. Le sizing et le verdict GO/NO-GO se font uniquement au moment du trade via le gate.
         </div>
       </div>
 
       {/* État initial */}
       {!propData && !loading && (
         <div className="card" style={{ textAlign: 'center', padding: 48 }}>
-          <div style={{ fontSize: 36, marginBottom: 12 }}>🎯</div>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🔭</div>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Aucune analyse effectuée</div>
-          <div className="mc" style={{ fontSize: 11, marginBottom: 4 }}>Entre ton capital puis clique "Analyser".</div>
-          <div className="mc" style={{ fontSize: 11 }}>L'outil croise : score composite, pullback, RSI, MACD, SMA200.</div>
+          <div className="mc" style={{ fontSize: 11, marginBottom: 4 }}>Clique "Analyser" pour voir les zones où les signaux convergent.</div>
+          <div className="mc" style={{ fontSize: 11 }}>Vue descriptive : score composite, pullback, RSI, MACD, SMA200.</div>
         </div>
       )}
 
@@ -984,7 +971,7 @@ function PropositionsTab(props) {
       {loading && (
         <div className="card" style={{ textAlign: 'center', padding: 48 }}>
           <div className="spin-anim" style={{ display: 'inline-block', fontSize: 32, marginBottom: 12 }}>⟳</div>
-          <div className="mc" style={{ fontSize: 12 }}>Calcul des propositions...</div>
+          <div className="mc" style={{ fontSize: 12 }}>Analyse des zones à surveiller...</div>
           <div className="mc" style={{ fontSize: 11, marginTop: 4 }}>Analyse des 22 tickers en cours.</div>
         </div>
       )}
@@ -993,26 +980,24 @@ function PropositionsTab(props) {
       {propData && regime === 'BEAR' && (
         <div className="card" style={{ textAlign: 'center', padding: 40, borderLeft: '3px solid #ef4444' }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>🚫</div>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Régime BEAR — Aucun trade LONG recommandé</div>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Régime BEAR — contexte défavorable au LONG</div>
           <div className="mc" style={{ fontSize: 12 }}>{propData.message}</div>
         </div>
       )}
 
-      {/* Cartes de trade */}
+      {/* Zones à surveiller (descriptif) */}
       {proposals.map(function(p, idx) {
-        var col   = starColor(p.stars);
-        var grade = gradeFromStars(p.stars);
-        var rr_tp1 = p.entry ? ((p.tp1 - p.entry) / (p.entry - p.stop_loss)).toFixed(1) : '1.5';
+        var col = zoneColor(p.convergence);
         return (
           <div key={p.ticker} className="card mb16" style={{ borderLeft: '3px solid ' + col }}>
             {/* Titre */}
             <div className="rowb" style={{ marginBottom: 12 }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 22, fontWeight: 800, color: col }}>{p.ticker}</span>
-                <span style={{ fontSize: 13 }}>{'⭐'.repeat(p.stars) + '☆'.repeat(5 - p.stars)}</span>
-                <span style={{ fontSize: 11, background: col + '22', color: col, borderRadius: 4, padding: '2px 8px', fontWeight: 700 }}>Grade {grade}</span>
                 {pbLabel(p.pb_status) && <span style={{ fontSize: 10, background: 'rgba(99,102,241,.15)', color: '#818cf8', borderRadius: 4, padding: '2px 8px' }}>{pbLabel(p.pb_status)}</span>}
+                {p.above_sma200 && <span style={{ fontSize: 10, background: '#10b98120', color: '#10b981', borderRadius: 4, padding: '2px 8px' }}>▲ SMA200</span>}
                 <span className="mc" style={{ fontSize: 10 }}>Score {p.score}/100</span>
+                <span className="mc" style={{ fontSize: 10 }}>Convergence {p.convergence}</span>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="btn" style={{ fontSize: 11 }} onClick={function() { onGoToSmc(p.ticker); }}>🧠 SMC</button>
@@ -1022,52 +1007,16 @@ function PropositionsTab(props) {
               </div>
             </div>
 
-            {/* Explication */}
-            <div style={{ fontSize: 12, lineHeight: 1.7, padding: '8px 12px', background: 'rgba(99,102,241,.07)', borderRadius: 6, marginBottom: 14 }}>
+            {/* Explication descriptive */}
+            <div style={{ fontSize: 12, lineHeight: 1.7, padding: '8px 12px', background: 'rgba(99,102,241,.07)', borderRadius: 6, marginBottom: 12 }}>
               💡 {p.explanation}
             </div>
 
-            {/* Niveaux */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
-              {[
-                { label: 'ENTRÉE',          val: '$' + p.entry,     sub: null,                     highlight: false },
-                { label: 'STOP LOSS',       val: '$' + p.stop_loss, sub: '–' + p.risk_pct + '%',   highlight: false, danger: true },
-                { label: 'TP1  (1:' + rr_tp1 + ')', val: '$' + p.tp1, sub: null,                  highlight: false, green: true },
-                { label: 'TP2  (1:2.5) ✅', val: '$' + p.tp2,      sub: null,                     highlight: true,  green: true },
-              ].map(function(cell) {
-                return (
-                  <div key={cell.label} style={{ textAlign: 'center', padding: '10px 6px', background: 'var(--bg)', borderRadius: 6, border: cell.highlight ? '1px solid #10b98144' : 'none' }}>
-                    <div style={{ fontSize: 9, color: 'var(--muted)', marginBottom: 4, letterSpacing: .5 }}>{cell.label}</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: cell.danger ? '#ef4444' : cell.green ? '#10b981' : 'var(--text)' }}>{cell.val}</div>
-                    {cell.sub && <div style={{ fontSize: 9, color: '#ef4444' }}>{cell.sub}</div>}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Position sizing */}
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', padding: '8px 12px', background: 'var(--bg)', borderRadius: 6, marginBottom: 12, fontSize: 12 }}>
-              <span>💰 Capital {Number(p.entry > 0 ? (propData.capital || 10000) : 10000).toLocaleString('fr-FR')} $</span>
-              <span style={{ color: 'var(--muted)' }}>→</span>
-              <span style={{ fontWeight: 700 }}>{p.shares} actions</span>
-              <span style={{ color: 'var(--muted)' }}>→ Risque max :</span>
-              <span style={{ fontWeight: 700, color: '#ef4444' }}>{p.total_risk_usd} $ (1%)</span>
-            </div>
-
-            {/* Règles */}
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {p.rules && [
-                { key: 'regime_ok',    label: 'Régime OK' },
-                { key: 'above_sma200', label: 'Au-dessus SMA200' },
-                { key: 'rr_ok',        label: 'R:R ≥ 2.5' },
-              ].map(function(rule) {
-                var ok = p.rules[rule.key];
-                return (
-                  <span key={rule.key} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, background: ok ? '#10b98120' : '#ef444420', color: ok ? '#10b981' : '#ef4444' }}>
-                    {ok ? '✅' : '⚠️'} {rule.label}
-                  </span>
-                );
-              })}
+            {/* Contexte (pas une reco d'entrée) */}
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center', padding: '8px 12px', background: 'var(--bg)', borderRadius: 6, fontSize: 12 }}>
+              <span className="mc" style={{ fontSize: 10 }}>Cours actuel <b style={{ color: 'var(--text)', fontSize: 13 }}>${p.price}</b></span>
+              {p.rsi != null && <span className="mc" style={{ fontSize: 10 }}>RSI <b style={{ color: 'var(--text)', fontSize: 13 }}>{p.rsi}</b></span>}
+              <span className="mc" style={{ fontSize: 10, fontStyle: 'italic' }}>Descriptif — pas d'entrée/SL/TP. Passe par le gate pour sizer un trade.</span>
             </div>
           </div>
         );
@@ -1077,8 +1026,8 @@ function PropositionsTab(props) {
       {propData && !loading && proposals.length === 0 && regime !== 'BEAR' && (
         <div className="card" style={{ textAlign: 'center', padding: 48 }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>🧘</div>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Aucune opportunité convaincante</div>
-          <div className="mc" style={{ fontSize: 12 }}>Pas de trade = pas de perte. Patience = edge.</div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Aucune zone de convergence notable</div>
+          <div className="mc" style={{ fontSize: 12 }}>Pas de signal fort = pas de trade forcé. Patience = edge.</div>
         </div>
       )}
     </div>
@@ -2097,6 +2046,15 @@ function PerformanceTab(props) {
       <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 20 }}>
             <div className="stitle">BACKTESTING</div>
 
+            {/* Bandeau post-pivot : visualisation rapide, pas un juge de paix */}
+            <div className="card mb16" style={{ padding: '10px 14px', borderLeft: '3px solid #f59e0b', background: 'rgba(245,158,11,.06)' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#f59e0b', marginBottom: 2 }}>⚠️ Visualisation rapide — non validée</div>
+              <div className="mc" style={{ fontSize: 11, lineHeight: 1.6 }}>
+                Backtester mécanique pré-pivot, sans frictions réelles ni out-of-sample ni Deflated Sharpe.
+                À ne pas utiliser pour décider — l'edge de timing a été réfuté (voir ROADMAP). Juge de paix : honest_backtester.py.
+              </div>
+            </div>
+
             {/* Formulaire */}
             <div className="card mb16" style={{ padding: '14px 16px' }}>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -2679,7 +2637,7 @@ function SmcTab(props) {
         var bdEntries = Object.keys(ud.scoring_breakdown || {}).map(function(k) { return { k: k, v: (ud.scoring_breakdown || {})[k] }; });
         return (
           <div className="mb16">
-            <div className="stitle">🎯 SCORE UNIFIÉ</div>
+            <div className="stitle">🎯 SCORE UNIFIÉ <span style={{ fontWeight: 400, fontSize: 10, color: 'var(--muted)', letterSpacing: 0 }}>— descriptif (lecture, pas un verdict d'entrée)</span></div>
             <div className="card" style={{ border: '1px solid ' + gc + '40', background: isAPlus ? 'rgba(251,191,36,.04)' : 'transparent' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -3721,7 +3679,6 @@ function SetupsTab(props) {
               ? new Date(setupsData.scanned_at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
               : '—'}
             {' — '}{setupsData.count || 0} setup(s) détecté(s)
-            {setupsData.capital ? ' | Capital $' + Number(setupsData.capital).toLocaleString() : ''}
           </div>
         )}
       </div>
@@ -3759,7 +3716,6 @@ function SetupsTab(props) {
         <div style={{ display: 'grid', gap: 12 }}>
           {setups.map(function(s, i) {
             var color = _SETUP_COLOR[s.setup_type] || '#64748b';
-            var pos   = s.position || {};
             return (
               <div key={i} className="card" style={{ borderLeft: '3px solid ' + color }}>
                 {/* En-tête */}
@@ -3801,19 +3757,6 @@ function SetupsTab(props) {
                     );
                   })}
                 </div>
-
-                {/* Position size */}
-                {!pos.error && pos.shares > 0 && (
-                  <div style={{ padding: '7px 10px', background: 'rgba(0,0,0,.2)', borderRadius: 5, marginBottom: 10, fontSize: 11 }}>
-                    <span className="mc">Position : </span>
-                    <span style={{ fontWeight: 600 }}>{pos.shares} actions</span>
-                    <span className="mc"> | </span>
-                    <span>${(pos.position_value || 0).toLocaleString()}</span>
-                    <span className="mc"> | Risque </span>
-                    <span style={{ color: 'var(--bear)', fontWeight: 600 }}>${pos.risk_dollars}</span>
-                    <span className="mc"> ({pos.risk_pct_actual}%)</span>
-                  </div>
-                )}
 
                 {/* Raisons */}
                 <div style={{ marginBottom: 10 }}>
@@ -5669,7 +5612,7 @@ function CoachTab(props) {
 var TABS = [
   { id: 'overview',   label: '📊 Vue d\'ensemble' },
   { id: 'coach',      label: '🤝 Coach'           },
-  { id: 'proposals',  label: '🎯 Propositions'    },
+  { id: 'proposals',  label: '🔭 Zones à surveiller' },
   { id: 'watchlist',  label: '📈 Watchlist'       },
   { id: 'reddit',    label: '🔴 Reddit'           },
   { id: 'news',      label: '📰 News'             },

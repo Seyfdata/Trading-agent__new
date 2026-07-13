@@ -127,13 +127,18 @@ app.include_router(social_router, prefix="/api")
 @app.get("/api/proposals")
 def get_proposals(capital: float = 10000.0):
     """
-    Propose jusqu'à 3 trades actionnables basés sur la convergence des signaux.
-    Croise : score composite, pullback status, indicateurs techniques.
-    Calcule : entrée, SL, TP1 (1:1.5), TP2 (1:2.5), position sizing.
+    Zones à surveiller (DESCRIPTIF, pas de recommandation d'entrée).
+
+    Post-pivot : l'edge de timing est réfuté (voir ROADMAP). Cet endpoint ne
+    propose plus d'entrée/SL/TP ni de sizing. Il liste, pour l'oeil du trader,
+    les tickers où plusieurs signaux descriptifs convergent (score composite,
+    pullback, RSI/MACD/SMA/ADX). Le sizing et le verdict GO/NO-GO se font
+    uniquement au moment du trade via risk_engine -> gate.
+    Le paramètre `capital` est conservé pour compatibilité mais n'est plus utilisé.
     """
     try:
         from config.settings import WATCHLIST
-        from analysis.technical_indicators import analyze_ticker as ti_analyze, clean_for_json as ti_clean
+        from analysis.technical_indicators import analyze_ticker as ti_analyze
         from analysis.scoring import score_ticker, score_market_context, rank_tickers
 
         # 1. Contexte marché
@@ -143,11 +148,15 @@ def get_proposals(capital: float = 10000.0):
         ctx = score_market_context(_extract_scoring_ctx(_raw_mkt))
         regime = ctx.get("regime", "UNKNOWN")
 
+        _NOTE = ("Descriptif — zones à surveiller, PAS des recommandations d'entrée. "
+                 "Le sizing et le verdict GO/NO-GO se font au moment du trade via le gate.")
+
         if regime == "BEAR":
             return {
-                "proposals": [],
+                "watch_zones": [],
                 "regime": regime,
-                "message": "Régime BEAR — pas de trade LONG recommandé. Attendre un retournement.",
+                "note": _NOTE,
+                "message": "Régime BEAR — contexte défavorable au LONG. Zones masquées.",
                 "generated_at": datetime.now().isoformat(),
             }
 
@@ -181,16 +190,13 @@ def get_proposals(capital: float = 10000.0):
                 "score":       base,
                 "pb_status":   pb,
                 "convergence": base + bonus,
-                "market":      t.get("market", {}),
             })
         candidates.sort(key=lambda x: x["convergence"], reverse=True)
 
-        # 5. Générer les fiches trade
-        proposals = []
-        RISK_PCT = 0.01  # 1% du capital par trade
-
+        # 5. Construire les zones descriptives (jusqu'à 3)
+        watch_zones = []
         for cand in candidates:
-            if len(proposals) >= 3:
+            if len(watch_zones) >= 3:
                 break
             ticker = cand["ticker"]
             try:
@@ -204,29 +210,8 @@ def get_proposals(capital: float = 10000.0):
 
                 mas    = ind.get("mas", {})
                 sma200 = mas.get("sma200")
-                sma20  = mas.get("sma20")
 
-                # SL = sous SMA20 ou 3% stop, le plus proche mais pas plus de 6%
-                default_sl = price * 0.97
-                sl = max(sma20 * 0.995, default_sl) if (sma20 and sma20 < price) else default_sl
-                risk     = price - sl
-                risk_pct = risk / price * 100
-
-                if risk_pct < 0.5 or risk_pct > 6.0:
-                    continue
-
-                tp1 = round(price + 1.5 * risk, 2)
-                tp2 = round(price + 2.5 * risk, 2)
-
-                # Position sizing
-                shares        = int((capital * RISK_PCT) / risk) if risk > 0 else 0
-                total_risk_usd = round(shares * risk, 2)
-
-                # Étoiles de confiance
-                conv  = cand["convergence"]
-                stars = 5 if conv >= 85 else 4 if conv >= 70 else 3 if conv >= 55 else 2 if conv >= 40 else 1
-
-                # Explication en français
+                # Explication descriptive en français
                 reasons = []
                 rsi  = ind.get("rsi")
                 if rsi and rsi < 40:
@@ -246,43 +231,31 @@ def get_proposals(capital: float = 10000.0):
                 if not reasons:
                     reasons.append("momentum technique favorable")
 
-                proposals.append(clean_for_json({
-                    "ticker":        ticker,
-                    "explanation":   ticker + " : " + ", ".join(reasons) + ".",
-                    "entry":         round(price, 2),
-                    "stop_loss":     round(sl, 2),
-                    "tp1":           tp1,
-                    "tp2":           tp2,
-                    "risk_pct":      round(risk_pct, 1),
-                    "rr":            2.5,
-                    "shares":         shares,
-                    "total_risk_usd": total_risk_usd,
-                    "stars":         stars,
-                    "score":         round(cand["score"]),
-                    "pb_status":     cand["pb_status"],
-                    "convergence":   round(cand["convergence"]),
-                    "above_sma200":  bool(sma200 and price > sma200),
-                    "rules": {
-                        "regime_ok":    regime in ("BULL", "NEUTRAL"),
-                        "above_sma200": bool(sma200 and price > sma200),
-                        "rr_ok":        True,
-                    },
+                watch_zones.append(clean_for_json({
+                    "ticker":       ticker,
+                    "explanation":  ticker + " : " + ", ".join(reasons) + ".",
+                    "price":        round(price, 2),   # cours actuel (contexte, pas une entrée)
+                    "rsi":          round(rsi, 1) if rsi else None,
+                    "score":        round(cand["score"]),
+                    "pb_status":    cand["pb_status"],
+                    "convergence":  round(cand["convergence"]),
+                    "above_sma200": bool(sma200 and price > sma200),
                 }))
             except Exception as e:
                 print(f"[Proposals] Erreur {ticker}: {e}")
                 continue
 
         return clean_for_json({
-            "proposals":    proposals,
+            "watch_zones":  watch_zones,
             "regime":       regime,
-            "capital":      capital,
+            "note":         _NOTE,
             "generated_at": datetime.now().isoformat(),
         })
 
     except Exception as e:
         import traceback
         print(f"[Proposals] Erreur: {e}\n{traceback.format_exc()}")
-        return {"proposals": [], "error": str(e), "generated_at": datetime.now().isoformat()}
+        return {"watch_zones": [], "error": str(e), "generated_at": datetime.now().isoformat()}
 
 
 # ── Setup detector ───────────────────────────────────────────────────────────
@@ -295,35 +268,29 @@ def get_setups(extra_tickers: str = ""):
     Les setups des extra_tickers portent is_discovery=True.
     """
     try:
-        import os
-        try:
-            from dotenv import load_dotenv
-            load_dotenv()
-        except ImportError:
-            pass
-        from analysis.setup_detector import detect_setups, calculate_position_size
-        capital = float(os.getenv("CAPITAL", 10000))
+        from analysis.setup_detector import detect_setups
 
         extras     = [t.strip().upper() for t in extra_tickers.split(",") if t.strip()] if extra_tickers else []
         extras_set = set(extras)
         wl_set     = set(WATCHLIST)
         combined   = list(WATCHLIST) + [t for t in extras if t not in wl_set]
 
+        # Descriptif uniquement : pas de sizing ici. Le sizing (risk_engine) et le
+        # verdict GO/NO-GO (gate) se font au moment du trade, jamais en amont.
         setups   = detect_setups(combined if extras else None)
-        enriched = []
-        for s in setups:
-            pos = calculate_position_size(s["entry"], s["stop"], capital)
-            enriched.append({**s, "position": pos, "is_discovery": s["ticker"] in extras_set})
+        enriched = [
+            {**s, "is_discovery": s["ticker"] in extras_set}
+            for s in setups
+        ]
 
         return clean_for_json({
             "count":      len(enriched),
             "setups":     enriched,
-            "capital":    capital,
             "scanned_at": datetime.now().isoformat(),
         })
     except Exception as e:
         return clean_for_json({
-            "count": 0, "setups": [], "capital": 0,
+            "count": 0, "setups": [],
             "scanned_at": datetime.now().isoformat(),
             "error": str(e),
         })

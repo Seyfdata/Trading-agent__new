@@ -5,6 +5,7 @@ Couvre: trades CRUD (post/get/put/delete), performance, performance/advanced.
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from analysis.technical_indicators import clean_for_json
 from database.models import (
@@ -32,6 +33,19 @@ async def create_trade(request: Request):
         missing = [f for f in required if f not in body]
         if missing:
             return clean_for_json({"error": f"Champs manquants : {', '.join(missing)}"})
+
+        # Gate obligatoire : un trade doit toujours porter le verdict du gate.
+        # L'override reste permis (gate_verdict peut valoir NO-GO/GO-WARN) et est
+        # tracé via gate_overridden, mais l'absence de verdict est refusée (400).
+        gate_verdict = body.get("gate_verdict")
+        if not gate_verdict:
+            return JSONResponse(
+                status_code=400,
+                content=clean_for_json({
+                    "error": ("gate_verdict requis : évalue le trade via le gate "
+                              "(GO/GO-WARN/NO-GO) avant de l'enregistrer."),
+                }),
+            )
 
         violations = []
         cv = body.get("conviction_pct")

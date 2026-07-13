@@ -11,6 +11,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## ⚠️ Pivot stratégique (voir ROADMAP.md)
+
+L'edge de timing prédictif a été **testé puis réfuté** sur données réelles (backtester honnête :
+frictions, OOS, Deflated Sharpe, permutation). Le produit n'est **plus** un prédicteur mais un
+**cockpit de discipline** : `risk_engine → pretrade_gate → journal`.
+
+- **Décisionnel** = uniquement `risk_engine` (sizing) → `pretrade_gate` (verdict GO/GO-WARN/NO-GO)
+  → `journal` (gate_verdict obligatoire à la création d'un trade).
+- **Descriptif seulement** (jamais décisionnel) : `smc_analyzer`, `unified_scorer`, `options_flow`,
+  `/api/proposals` (zones à surveiller, sans entrée/SL/TP/sizing), `/api/setups` (sans sizing),
+  `/api/backtest` (visualisation rapide non validée — juge de paix = `honest_backtester.py`).
+
+---
+
 ## Commandes courantes
 
 ```bash

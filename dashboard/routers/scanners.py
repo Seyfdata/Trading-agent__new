@@ -13,6 +13,14 @@ from database.models import DB_PATH
 
 router = APIRouter()
 
+# Post-pivot : le backtester mécanique (backtester.py) est une visualisation rapide,
+# PAS un juge de paix. Pas de frictions/OOS/DSR/permutation. Ne pas décider dessus.
+_BACKTEST_DISCLAIMER = (
+    "Visualisation rapide non validée — backtester mécanique (pré-pivot), sans "
+    "frictions réelles ni out-of-sample ni Deflated Sharpe. À ne pas utiliser pour "
+    "décider. Le juge de paix honnête est analysis/honest_backtester.py."
+)
+
 
 @router.get("/pullbacks")
 def get_pullbacks():
@@ -85,6 +93,8 @@ def get_backtest_ticker(
         else:
             return {"error": f"Strategie inconnue : {strategy}. Valeurs : {STRATEGIES + ['ALL']}"}
 
+        if isinstance(result, dict):
+            result["disclaimer"] = _BACKTEST_DISCLAIMER
         return clean_for_json(result)
     except Exception as e:
         return {"error": str(e), "ticker": ticker}
@@ -100,6 +110,8 @@ def get_backtest_report(period: str = "3y", top_n: int = 10):
         from analysis.backtester import backtest_full_report
         tickers = _top_tickers_from_db_or_watchlist(top_n)
         result  = backtest_full_report(tickers, period=period)
+        if isinstance(result, dict):
+            result["disclaimer"] = _BACKTEST_DISCLAIMER
         return clean_for_json(result)
     except Exception as e:
         return {"error": str(e)}
